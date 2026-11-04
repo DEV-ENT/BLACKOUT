@@ -4,44 +4,69 @@ import BlackoutCore
 struct RootView: View {
     @AppStorage("name") private var name = ""
     @AppStorage("code") private var code = ""
+    @AppStorage("groupName") private var groupName = "My group"
     @State private var engine: Engine?
+    @State private var invite: PendingInvite?   // from an invite link
+    @State private var confirmSwitch = false
+    @State private var showInvite = false       // opens the invite sheet, e.g. right after creating a group
 
     var body: some View {
         Group {
             if let engine {
-                MainView(engine: engine)
+                MainView(engine: engine, showInvite: $showInvite)
             } else if code.isEmpty {
-                SetupView { n, c in name = n; code = c; engine = Engine(name: n, code: c) }
+                SetupView(invite: invite) { n, g, c, created in
+                    SavedGroups.remember(.init(name: g, code: c))
+                    name = n; groupName = g; code = c
+                    engine = Engine(name: n, code: c)
+                    invite = nil; showInvite = created
+                }
             } else {
                 Theme.bg.ignoresSafeArea().onAppear { engine = Engine(name: name, code: code) }
             }
         }
         .tint(Theme.amber)
+        .onOpenURL { url in
+            guard let i = Invite.parse(url) else { return }
+            invite = PendingInvite(name: i.name, code: i.code)
+            if !code.isEmpty && i.code != code { confirmSwitch = true } // already in another group: ask first
+        }
+        .alert("Join \(invite?.name ?? "")?", isPresented: $confirmSwitch, presenting: invite) { i in
+            Button("Join") {
+                if let engine { SavedGroups.switchTo(groupName: i.name, code: i.code, engine: engine) }
+                invite = nil
+            }
+            Button("Cancel", role: .cancel) { invite = nil }
+        } message: { i in
+            Text("You'll see \(i.name)'s messages instead of \(groupName)'s. You can switch back in People > settings.")
+        }
     }
 }
+
+struct PendingInvite: Equatable { let name: String; let code: String }
 
 // MARK: - Setup
 
 struct SetupView: View {
-    let join: (String, String) -> Void
+    var invite: PendingInvite?
+    /// name, group name, group code, and whether the group was just created
+    let done: (String, String, String, Bool) -> Void
     @State private var name = ""
+    @State private var joining = false
+    @State private var groupName = ""
     @State private var code = ""
     @FocusState private var focus: Field?
-    enum Field { case name, code }
+    enum Field { case name, group, code }
 
-    private var cleanName: String { String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(20)) }
-    private var cleanCode: String { code.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var missing: String? {
-        if cleanName.isEmpty { return "Enter your name." }
-        if cleanCode.count < 8 { return "The group code needs at least 8 characters (\(cleanCode.count) so far)." }
-        return nil
-    }
+    private func clean(_ s: String, _ max: Int) -> String { String(s.trimmingCharacters(in: .whitespacesAndNewlines).prefix(max)) }
+    private var cleanName: String { clean(name, 20) }
+    private var cleanCode: String { clean(code, 200) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Radar(phones: 3, radio: true).frame(width: 132, height: 132).frame(maxWidth: .infinity)
-                    .accessibilityHidden(true).padding(.top, 12)
+                Radar(phones: 3, radio: true).frame(width: 120, height: 120).frame(maxWidth: .infinity)
+                    .accessibilityHidden(true).padding(.top, 8)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 0) {
                         Text("BLACKOUT").tracking(5)
@@ -53,24 +78,57 @@ struct SetupView: View {
                 }
                 Card {
                     Kicker("How it works", color: Theme.amber)
-                    step("01", "Phones nearby connect on their own, over Bluetooth and Wi-Fi.")
-                    step("02", "Every phone passes messages on, so they hop to people out of range.")
-                    step("03", "Only people with your group code can read your group.")
+                    step("01", "Make a group, or join a friend's by scanning their invite QR.")
+                    step("02", "Phones nearby connect on their own, over Bluetooth and Wi-Fi.")
+                    step("03", "Every phone passes messages on, so they hop to people out of range.")
                 }
                 InputField(label: "Your name", hint: "Shown next to your messages.", active: focus == .name, tap: { focus = .name }) {
-                    TextField("", text: $name).focused($focus, equals: .name).submitLabel(.next).onSubmit { focus = .code }
+                    TextField("", text: $name).focused($focus, equals: .name).submitLabel(.done)
                 }
-                InputField(label: "Group code", hint: "Agree on it in person. Anyone who knows it can read the group.",
-                           active: focus == .code, tap: { focus = .code }) {
-                    TextField("", text: $code).focused($focus, equals: .code)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .submitLabel(.join).onSubmit { if missing == nil { join(cleanName, cleanCode) } }
-                }
-                VStack(spacing: 10) {
-                    Button("Join the mesh") { join(cleanName, cleanCode) }
-                        .buttonStyle(PrimaryButton()).disabled(missing != nil)
-                    if let missing, !(name.isEmpty && code.isEmpty) {
-                        Text(missing).font(.footnote).foregroundStyle(Theme.dim)
+                if let invite {
+                    Card {
+                        Kicker("You're invited to", color: Theme.amber)
+                        Text(invite.name).font(Theme.mono(24, .heavy)).foregroundStyle(Theme.text)
+                        Button("Join \(invite.name)") { done(cleanName, invite.name, invite.code, false) }
+                            .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
+                        if cleanName.isEmpty { Text("Enter your name first.").font(.footnote).foregroundStyle(Theme.dim) }
+                    }
+                } else {
+                    Kicker("Your group")
+                    HStack(spacing: 8) {
+                        ChannelPill(title: "Create a group", selected: !joining, color: Theme.amber) { joining = false }
+                        ChannelPill(title: "Join a group", selected: joining, color: Theme.amber) { joining = true }
+                    }
+                    if joining {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "qrcode.viewfinder").font(.title2).foregroundStyle(Theme.amber)
+                            Text("Got an invite QR? Open the iPhone Camera, point it at the QR code, and tap the Blackout link.")
+                                .font(.subheadline).foregroundStyle(Theme.text)
+                        }
+                        InputField(label: "Or type the group code", hint: "Your friend finds it under People > Invite friends.",
+                                   active: focus == .code, tap: { focus = .code }) {
+                            TextField("", text: $code).focused($focus, equals: .code)
+                                .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        }
+                        Button("Join") { done(cleanName, "Group", cleanCode, false) }
+                            .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty || cleanCode.count < 8)
+                        if !(name.isEmpty && code.isEmpty), let why = cleanName.isEmpty ? "Enter your name." :
+                            cleanCode.count < 8 ? "Codes have at least 8 characters." : nil {
+                            Text(why).font(.footnote).foregroundStyle(Theme.dim)
+                        }
+                    } else {
+                        InputField(label: "Group name", hint: "For example Family, or Building 12. You can change it later.",
+                                   active: focus == .group, tap: { focus = .group }) {
+                            TextField("", text: $groupName).focused($focus, equals: .group).submitLabel(.done)
+                        }
+                        Button("Create group") {
+                            let g = clean(groupName, Invite.maxGroupName)
+                            done(cleanName, g.isEmpty ? String("\(cleanName)'s group".prefix(Invite.maxGroupName)) : g, Invite.newCode(), true)
+                        }
+                        .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
+                        Text(cleanName.isEmpty ? "Enter your name first." :
+                                "Blackout makes a secret code for the group. Then you get a QR code to invite friends.")
+                            .font(.footnote).foregroundStyle(Theme.dim)
                     }
                 }
             }
@@ -116,24 +174,29 @@ struct InputField<Field: View>: View {
 
 struct MainView: View {
     @ObservedObject var engine: Engine
+    @Binding var showInvite: Bool
+    @State private var tab = 0
 
     var body: some View {
         VStack(spacing: 0) {
             MeshHeader(engine: engine)
-            TabView {
-                tab(ChatView(engine: engine)).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
-                tab(AiView(engine: engine)).tabItem { Label("AI", systemImage: "sparkles") }
-                tab(RadioView(engine: engine)).tabItem { Label("Radio", systemImage: "antenna.radiowaves.left.and.right") }
+            TabView(selection: $tab) {
+                page(ChatView(engine: engine)).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(0)
+                page(PeopleView(engine: engine, showInvite: $showInvite)).tabItem { Label("People", systemImage: "person.2.fill") }.tag(1)
+                page(AiView(engine: engine)).tabItem { Label("AI", systemImage: "sparkles") }.tag(2)
+                page(RadioView(engine: engine)).tabItem { Label("Radio", systemImage: "antenna.radiowaves.left.and.right") }.tag(3)
                 #if DEBUG
-                tab(LanTestView(engine: engine)).tabItem { Label("LAN test", systemImage: "network") }
+                page(LanTestView(engine: engine)).tabItem { Label("LAN test", systemImage: "network") }.tag(4)
                 #endif
             }
             .tint(Theme.amber)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .onAppear { if showInvite { tab = 1 } }           // right after creating a group: invite people
+        .onChange(of: showInvite) { open in if open { tab = 1 } }
     }
 
-    private func tab<V: View>(_ v: V) -> some View {
+    private func page<V: View>(_ v: V) -> some View {
         v.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg)
     }
@@ -153,7 +216,7 @@ struct MeshHeader: View {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 0) {
                             if engine.phones == 0 { Text("SEARCHING"); Cursor() }
-                            else { Text("\(engine.phones) PHONE\(engine.phones == 1 ? "" : "S") LINKED") }
+                            else { Text("\(engine.phones) PHONE\(engine.phones == 1 ? "" : "S") IN RANGE") }
                         }
                         .font(Theme.mono(15, .bold)).foregroundStyle(Theme.text)
                         HStack(spacing: 6) {
@@ -192,13 +255,14 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var tooLong = false
     @State private var toPublic = false
+    @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
     var body: some View {
         VStack(spacing: 0) {
             if engine.messages.isEmpty {
                 EmptyState(title: "No messages yet",
-                           text: "Messages from your group and the Public channel show up here. Keep Blackout open near other phones: they connect on their own.") {
+                           text: "Messages from your group and the Public channel show up here. Invite friends from the People tab, then keep Blackout open near each other.") {
                     Radar(phones: engine.phones, radio: engine.radioLinked).frame(width: 150, height: 150)
                 }
             } else {
@@ -229,10 +293,10 @@ struct ChatView: View {
             }
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    ChannelPill(title: "Group", selected: !toPublic, color: Theme.amber) { toPublic = false }
+                    ChannelPill(title: String(groupName.prefix(14)), selected: !toPublic, color: Theme.amber) { toPublic = false }
                     ChannelPill(title: "Public", selected: toPublic, color: Theme.open) { toPublic = true }
                     Spacer()
-                    Text(toPublic ? "Everyone with Blackout can read it" : "Only your group can read it")
+                    Text(toPublic ? "Everyone with Blackout can read it" : "Only your group can read it").lineLimit(1).minimumScaleFactor(0.8)
                         .font(.caption).foregroundStyle(toPublic ? Theme.open : Theme.dim)
                 }
                 Composer(draft: $draft, placeholder: toPublic ? "Message to everyone" : "Message to your group",

@@ -40,6 +40,28 @@ A packet that fails to decrypt is still stored and forwarded. It just isn't show
 - **Public channel:** messages sealed with the code `blackout-public`, which everyone knows. Anyone can read and post them, including people without the app through the Wi-Fi board (Android). Apps show them marked as public.
 - **Reading:** a device tries its own group's key first, then the public key. A packet that opens with neither is relayed but not shown.
 
+## Invites
+
+An invite link carries a group's name and code so nobody has to type the code:
+
+```
+blackout://join?name=<group name>&code=<group code>
+```
+
+- Both values are URL-encoded query items. `code` has at least 8 characters. `name` is only a label shown on screen; it is not used for encryption, and a missing name means "Group".
+- Apps show the link as a QR code and can send it any way the phone can share a link, such as AirDrop.
+- New groups get a random code of 16 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, in four groups of four joined by `-` (80 bits of entropy).
+- Anyone with the link can read the group, exactly like anyone who knows the code.
+
+## Check-ins
+
+A check-in is an ordinary group message, so apps that don't know check-ins still show it as text:
+
+- `✅ I'm safe` means safe. Any message whose text starts with `✅` counts as "safe".
+- `🆘 I need help` means needs help. Any message whose text starts with `🆘` counts as "needs help".
+
+A person's status is their most recent check-in.
+
 ## Forwarding rules
 
 - **Flooding:** each packet goes to every connected peer except the one it came from.

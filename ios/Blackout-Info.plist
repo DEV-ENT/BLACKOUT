@@ -8,6 +8,16 @@
 		<string>_blackout-mesh._tcp</string>
 		<string>_blackout-mesh._udp</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!-- Group invites: blackout://join?name=...&code=... (Invite.swift) -->
+			<key>CFBundleURLName</key>
+			<string>it.blackout.mesh.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>blackout</string></array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

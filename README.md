@@ -23,6 +23,11 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **AI that runs on the phone.** It needs no internet once its model is downloaded.
   - **iPhone:** runs on llama.cpp. You pick the model in the app, and it keeps the conversation as context.
   - **Android:** runs Qwen 2.5 1.5B on MediaPipe.
+- **Groups and people (iPhone):**
+  - "Create a group" makes a strong random code. Friends join by pointing the iPhone Camera at the invite QR, or by an invite sent over AirDrop.
+  - The People tab shows who is in your group, who is in range now, and when you last heard from everyone else.
+  - **I'm safe** and **Need help** check-in buttons.
+  - Groups you leave are kept, so you can switch back.
 - **Public channel.** Anyone with Blackout can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
 - **Android extras:**
   - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.

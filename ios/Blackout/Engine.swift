@@ -10,9 +10,12 @@ final class Engine: ObservableObject {
     @Published private(set) var bluetoothLinks = 0
     @Published private(set) var wifiLinks = 0
     @Published private(set) var radioLinked = false
+    @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
+    @Published private(set) var name: String
     let deviceId: String
-    let name: String
-    private let crypto: GroupCrypto
+    private var _crypto: GroupCrypto // the group key; read from the router's thread, so guarded by cryptoLock
+    private let cryptoLock = NSLock()
+    private var crypto: GroupCrypto { cryptoLock.withLock { _crypto } }
     private let publicCrypto = GroupCrypto(code: GroupCrypto.publicCode)
     private let store = PacketStore()
     private(set) var router: MeshRouter!
@@ -30,7 +33,7 @@ final class Engine: ObservableObject {
             d.set(deviceId, forKey: "device")
         }
         self.name = name
-        crypto = GroupCrypto(code: code)
+        _crypto = GroupCrypto(code: code)
         router = MeshRouter(send: { [weak self] peer, p in self?.route(peer, p) },
                             deliver: { [weak self] p in self?.onDeliver(p) })
         let all = store.loadAll()
@@ -51,6 +54,15 @@ final class Engine: ObservableObject {
     }
 
     var statusLines: [String] { status.keys.sorted().compactMap { status[$0] } }
+
+    /// Switches to another group (or just another name) without restarting the radios: every phone relays every
+    /// group anyway. Messages of the old group stay stored and come back on rejoining. Call on the main thread.
+    func rejoin(name: String, code: String) {
+        let c = GroupCrypto(code: code)
+        cryptoLock.withLock { _crypto = c }
+        self.name = name
+        messages = store.loadAll().compactMap { read($0) }.sorted { $0.ts < $1.ts }
+    }
 
     /// Writes a message from this phone, to the group or to the Public channel. Call on the main thread.
     /// Returns false if it is too long for a LoRa packet (it still travels over Bluetooth and Wi-Fi).
@@ -74,6 +86,7 @@ final class Engine: ObservableObject {
             if self.lan.linked { linked += 1 }
             #endif
             self.bluetoothLinks = bt.count; self.wifiLinks = wifi.count
+            self.linkedNodes = Set(bt).union(wifi)
             self.phones = linked; self.radioLinked = self.lora.connected
         }
     }
