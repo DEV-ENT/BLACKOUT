@@ -1,0 +1,24 @@
+# Build outputs
+build/
+app/build/
+.gradle/
+.kotlin/
+*.apk
+DerivedData/
+
+# Machine-specific
+local.properties
+.idea/
+xcuserdata/
+*.xcuserstate
+.DS_Store
+
+# Swift package build state
+ios/BlackoutCore/.build/
+ios/BlackoutCore/.swiftpm/
+
+# llama.cpp binary (75 MB): run ios/Vendor/fetch-llama.sh, which downloads the pinned release and checks its SHA-256
+ios/Vendor/llama.framework/
+
+# AI models are downloaded by the app on the phone, never committed
+*.gguf

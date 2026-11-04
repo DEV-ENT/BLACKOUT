@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>it.blackout.macpeer</string>
+	<key>CFBundleName</key>
+	<string>Blackout Mac Peer</string>
+	<key>CFBundleExecutable</key>
+	<string>BlackoutMacPeer</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>The Blackout test peer uses Bluetooth to exchange test messages with the Blackout iPhone app.</string>
+</dict>
+</plist>

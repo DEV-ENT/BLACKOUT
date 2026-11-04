@@ -1,0 +1,367 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B1AC00000000000000000001 /* BlackoutCore in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000020 /* BlackoutCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B1AC00000000000000000002 /* Blackout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Blackout.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1AC0000000000000000000D /* Blackout-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Blackout-Info.plist"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B1AC00000000000000000003 /* Blackout */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Blackout;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B1AC00000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1AC00000000000000000001 /* BlackoutCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B1AC00000000000000000005 = {
+			isa = PBXGroup;
+			children = (
+				B1AC00000000000000000003 /* Blackout */,
+				B1AC0000000000000000000D /* Blackout-Info.plist */,
+				B1AC00000000000000000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B1AC00000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B1AC00000000000000000002 /* Blackout.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B1AC00000000000000000007 /* Blackout */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1AC00000000000000000008 /* Build configuration list for PBXNativeTarget "Blackout" */;
+			buildPhases = (
+				B1AC00000000000000000031 /* Check llama.framework */,
+				B1AC00000000000000000009 /* Sources */,
+				B1AC00000000000000000004 /* Frameworks */,
+				B1AC0000000000000000000A /* Resources */,
+				B1AC00000000000000000030 /* Embed llama.framework */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B1AC00000000000000000003 /* Blackout */,
+			);
+			name = Blackout;
+			packageProductDependencies = (
+				B1AC00000000000000000020 /* BlackoutCore */,
+			);
+			productName = Blackout;
+			productReference = B1AC00000000000000000002 /* Blackout.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B1AC0000000000000000000B /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2720;
+			};
+			buildConfigurationList = B1AC0000000000000000000C /* Build configuration list for PBXProject "Blackout" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B1AC00000000000000000005;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B1AC00000000000000000021 /* XCLocalSwiftPackageReference "BlackoutCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B1AC00000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B1AC00000000000000000007 /* Blackout */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B1AC0000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B1AC00000000000000000031 /* Check llama.framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Check llama.framework";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Real-iPhone builds link llama.cpp, which is not committed (75 MB). Fail early with a clear message if it is missing.\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ] && [ ! -d \"$PROJECT_DIR/Vendor/llama.framework\" ]; then\n  echo \"error: llama.framework is missing: run ios/Vendor/fetch-llama.sh once\"\n  exit 1\nfi\n";
+		};
+		B1AC00000000000000000030 /* Embed llama.framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed llama.framework";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# llama.cpp (Vendor/fetch-llama.sh) has only an iPhone build, so it is linked and embedded only for real devices.\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ]; then\n  set -e\n  if [ ! -d \"$PROJECT_DIR/Vendor/llama.framework\" ]; then echo \"error: llama.framework missing: run ios/Vendor/fetch-llama.sh once\"; exit 1; fi\n  DEST=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\n  mkdir -p \"$DEST\"\n  rsync -a --delete \"$PROJECT_DIR/Vendor/llama.framework\" \"$DEST/\"\n  if [ -n \"$EXPANDED_CODE_SIGN_IDENTITY\" ]; then\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --preserve-metadata=identifier,entitlements \"$DEST/llama.framework\"\n  fi\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B1AC00000000000000000009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B1AC00000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = MT94WQCB6S;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B1AC00000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = MT94WQCB6S;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B1AC00000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Blackout-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Blackout uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Blackout connects directly to nearby iPhones to exchange messages without internet.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.3;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"-framework",
+					llama,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = it.blackout.mesh;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B1AC00000000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Blackout-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Blackout uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Blackout connects directly to nearby iPhones to exchange messages without internet.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.3;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"-framework",
+					llama,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = it.blackout.mesh;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B1AC00000000000000000008 /* Build configuration list for PBXNativeTarget "Blackout" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1AC00000000000000000012 /* Debug */,
+				B1AC00000000000000000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B1AC0000000000000000000C /* Build configuration list for PBXProject "Blackout" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1AC00000000000000000010 /* Debug */,
+				B1AC00000000000000000011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B1AC00000000000000000021 /* XCLocalSwiftPackageReference "BlackoutCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = BlackoutCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B1AC00000000000000000020 /* BlackoutCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BlackoutCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B1AC0000000000000000000B /* Project object */;
+}

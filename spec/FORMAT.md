@@ -1,0 +1,129 @@
+# Blackout wire format (v0.3, marker byte 0xB2)
+
+The Android and iPhone apps must produce and accept exactly these bytes.
+`test-vectors.txt` holds byte-exact examples; both apps' unit tests check against it.
+
+## Packet
+
+All integers are big-endian.
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| 0 | 1 | marker | `0xB2`. Anything else is dropped. |
+| 1 | 8 | id | Random. Written as 16 lowercase hex chars wherever it is used as text. |
+| 9 | 8 | ts | Sender's clock, milliseconds since 1970-01-01 UTC, signed 64-bit. |
+| 17 | 1 | ttl | Hops left, 0–64. Packets with ttl > 64 are dropped. |
+| 18 | n | cipher | 1–16000 bytes. See below. |
+
+Relays read only id, ts and ttl.
+
+## Encryption
+
+- **Key:** PBKDF2-HMAC-SHA256, 120000 iterations, 32-byte output.
+  - Password: the group code, NFC-normalized, as UTF-8 bytes.
+  - Salt: the ASCII bytes of `blackout-mesh-v1`.
+- **Cipher:** AES-256-GCM with a 12-byte random IV and a 16-byte tag.
+  - Associated data: the UTF-8 bytes of `<id hex>|<ts decimal>`, for example `0123456789abcdef|1793807238631`.
+  - `cipher` = IV (12) ‖ ciphertext ‖ tag (16).
+- **Plaintext:** three text fields in this order:
+  1. `sender`: the device id.
+  2. `name`: the display name.
+  3. `text`: the message.
+- **Text field:** a 2-byte length followed by that many bytes of standard UTF-8. Do not use Java's modified UTF-8.
+- Readers ignore bytes after the third field, which leaves room for future fields.
+
+A packet that fails to decrypt is still stored and forwarded. It just isn't shown.
+
+## Forwarding rules
+
+- **Flooding:** each packet goes to every connected peer except the one it came from.
+- **Deduplication:** a packet whose id has already been seen is ignored.
+- **TTL:** forwarded copies carry `ttl - 1`, and only if the received ttl is greater than 1. New messages start at ttl 16.
+- **Storage:** up to 500 packets, kept for at most 7 days. All stored packets are sent to every newly connected peer.
+
+## Transports
+
+| Transport | Framing |
+|---|---|
+| Nearby Connections (Android only) | One `BYTES` payload per packet. |
+| LAN test mode (debug builds) | 4-byte length, then the packet. |
+| LoRa via Meshtastic | The packet is `Data.payload` on port 256 (`PRIVATE_APP`), broadcast on channel 0 with hop limit 3. The whole packet must be ≤ 233 bytes. |
+| Bluetooth LE (Android and iPhone) | See below. |
+| Apple peer-to-peer (iPhone only) | MultipeerConnectivity. Each packet is one `.reliable` message. See below. |
+
+## Bluetooth LE
+
+This is the only radio link both platforms share without a router. Android phones also keep Nearby. Duplicate packets arriving over both are dropped by the forwarding rules.
+
+### Roles
+
+Every device is a **peripheral**: it advertises and runs a GATT server. It is also a **central**: it scans and connects.
+
+An iPhone in the background advertises in a way Android cannot see. It can still scan and connect out to Android phones, which always advertise.
+
+### Service UUID
+
+Take the first 16 bytes of SHA-256 over the UTF-8 bytes of `ble:` + NFC(group code). Read them as a big-endian UUID. Only devices with the same group code find each other.
+
+- **Advertisement:** connectable. It contains only this 128-bit service UUID, with no device name.
+- **Example:** see `kind: ble-service` in `test-vectors.txt`.
+
+### Characteristics
+
+| Name | UUID | Properties | Direction |
+|---|---|---|---|
+| RX | `33826aba-0bb0-4dfe-9c1a-86e48726ed62` | write (with response) | central → peripheral |
+| TX | `94eb2c34-0e66-4bea-864c-d02a7694a3d5` | notify, with a CCCD descriptor | peripheral → central |
+
+### Connection setup
+
+1. The central connects.
+2. It requests the largest ATT MTU and discovers the service.
+3. It enables notifications on TX by writing `01 00` to its CCCD.
+4. The link is then open in both directions.
+
+### Frames
+
+Each direction carries a stream of frames:
+
+`type` (1 byte) ‖ `length` (2 bytes, big-endian) ‖ `payload` (`length` bytes).
+
+**Chunking:**
+- The stream is cut into chunks of at most min(ATT_MTU − 3, 512) bytes. 512 is the longest attribute value BLE allows; Android throws an error above it.
+- Each chunk is one write (central → peripheral) or one notification (peripheral → central). Long or prepared writes are not used.
+- A side sends its next chunk only after the previous one completes. For the central, that is the write response. For the peripheral, that is the notification-sent callback.
+
+**Frame types:**
+
+| Type | Name | Payload |
+|---|---|---|
+| 1 | HELLO | Version byte `1`, then the node id: printable ASCII, 1–64 bytes. |
+| 2 | PACKET | One packet (see above), up to 18 + 16000 bytes. |
+
+- Each side sends HELLO as its first frame, as soon as it can send. For the central, that is after its CCCD write completes. For the peripheral, that is when notifications get enabled.
+- PACKET frames received before the other side's HELLO are ignored.
+- An unknown type, a version other than 1, or a bad length means: disconnect.
+- After both HELLOs, each side treats the link as a neighbor in the forwarding rules. That includes sending it all stored packets.
+
+### Duplicate links
+
+Two devices may connect to each other twice, once in each direction. When a device sees a second link to a node id it already has a link with, it keeps only one:
+- Keep the link whose central has the smaller node id, comparing bytes.
+- If both links have the same central, keep the newer one.
+
+Both sides reach the same decision. Either side may close the other link.
+
+## History
+
+- `0xB1`, v0.2: text fields used Java's modified UTF-8, and the code was not normalized.
+- `0xB2`, v0.3: standard UTF-8, NFC-normalized group code.
+
+## Apple peer-to-peer (iPhone to iPhone)
+
+iPhones also connect to each other with MultipeerConnectivity, which uses Bluetooth and Apple's peer-to-peer Wi-Fi. Android cannot join these connections.
+
+- **Service type:** `blackout-mesh`. It is listed in the app's `NSBonjourServices`.
+- **Peer display name:** the node id.
+- **Discovery info:** `g` = hex of the first 8 bytes of SHA-256(UTF-8(`mc:` + NFC(group code))). Peers with a different `g` are ignored.
+- **Who invites:** the device with the smaller node id. The invitation context is the UTF-8 bytes of `g`, and invitations with a different context are declined.
+- **Messages:** each packet is sent as one `.reliable` message.
