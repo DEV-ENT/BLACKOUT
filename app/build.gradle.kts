@@ -4,7 +4,7 @@ android {
     compileSdk = 35
     defaultConfig {
         applicationId = "it.blackout.mesh"
-        minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "0.3"
+        minSdk = 26; targetSdk = 34; versionCode = 4; versionName = "0.4"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

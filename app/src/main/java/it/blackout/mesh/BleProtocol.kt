@@ -1,9 +1,6 @@
 package it.blackout.mesh
 
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.security.MessageDigest
-import java.text.Normalizer
 import java.util.UUID
 
 /** Bluetooth LE link protocol (spec/FORMAT.md, "Bluetooth LE"). Pure logic, no Android dependencies. */
@@ -17,13 +14,8 @@ object BleProtocol {
     private const val MAX_NODE_ID = 64
     private const val MAX_PACKET = 18 + Packet.MAX_CIPHER
 
-    /** First 16 bytes of SHA-256("ble:" + NFC(code)), so only the same group finds each other. */
-    fun serviceUuid(code: String): UUID {
-        val h = MessageDigest.getInstance("SHA-256")
-            .digest(("ble:" + Normalizer.normalize(code, Normalizer.Form.NFC)).toByteArray(Charsets.UTF_8))
-        val b = ByteBuffer.wrap(h, 0, 16)
-        return UUID(b.long, b.long)
-    }
+    /** The same for every Blackout device: all of them relay for each other, whatever their group. */
+    val SERVICE: UUID = UUID.fromString("bec33cd5-a64e-4e1a-b8c1-868db67d0df3")
 
     fun frame(type: Int, payload: ByteArray): ByteArray =
         byteArrayOf(type.toByte(), (payload.size ushr 8).toByte(), payload.size.toByte()) + payload

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../.."
 APP=build/mac-peer/BlackoutMacPeer.app
 mkdir -p "$APP/Contents/MacOS"
 cp tools/mac-peer/Info.plist "$APP/Contents/Info.plist"
-swiftc -O -module-name BlackoutMacPeer -o "$APP/Contents/MacOS/BlackoutMacPeer" \
+swiftc -O -swift-version 5 -module-name BlackoutMacPeer -o "$APP/Contents/MacOS/BlackoutMacPeer" \
   ios/BlackoutCore/Sources/BlackoutCore/*.swift ios/Blackout/BleLink.swift tools/mac-peer/main.swift
 codesign --force -s - "$APP" >/dev/null
 LOG="${2:-build/mac-peer/peer.log}"

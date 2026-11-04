@@ -1,7 +1,6 @@
 package it.blackout.mesh
 
 import java.io.*
-import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
@@ -40,7 +39,8 @@ class Packet(val id: String, val ts: Long, val ttl: Int, val cipher: ByteArray) 
     }
 }
 
-data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String)
+/** [public]: sent on the Public channel (spec/FORMAT.md), readable by everyone. */
+data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String, val public: Boolean = false)
 
 class GroupCrypto(code: String) {
     private val key = SecretKeySpec(deriveKey(code), "AES")
@@ -78,8 +78,8 @@ class GroupCrypto(code: String) {
         }
         private fun DataInputStream.getStr(): String = String(ByteArray(readUnsignedShort()).also { readFully(it) }, Charsets.UTF_8)
 
-        fun serviceId(code: String): String =
-            "it.blackout.mesh." + MessageDigest.getInstance("SHA-256").digest("svc:$code".toByteArray()).take(8).joinToString("") { "%02x".format(it) }
+        /** Code of the Public channel: everyone knows it, so anyone can read and post (spec/FORMAT.md). */
+        const val PUBLIC_CODE = "blackout-public"
     }
 }
 

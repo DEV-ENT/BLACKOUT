@@ -20,6 +20,8 @@ class MainActivity : Activity() {
     private lateinit var scroll: ScrollView
     private lateinit var aiOut: TextView
     private lateinit var dl: Button
+    private lateinit var boardStatus: TextView
+    private lateinit var boardButton: Button
     private val fmt = SimpleDateFormat("HH:mm", Locale.ITALY)
 
     override fun onCreate(b: Bundle?) {
@@ -66,15 +68,18 @@ class MainActivity : Activity() {
         log = label("").apply { setTextIsSelectable(true) }
         scroll = ScrollView(this).apply { addView(log) }
         val msg = input("Message").apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
+        val public = CheckBox(this).apply { text = "Send on the Public channel (everyone can read)"; setTextColor(Color.LTGRAY) }
         val chat = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(public)
             addView(LinearLayout(context).apply {
                 addView(msg)
                 addView(Button(context).apply { text = "Send"; setOnClickListener {
                     val t = msg.text.toString().trim().take(1000)
+                    val toPublic = public.isChecked
                     if (t.isNotEmpty() && MeshEngine.router != null) { msg.setText(""); Thread {
-                        val fits = MeshEngine.send(t)
+                        val fits = MeshEngine.send(t, toPublic)
                         if (!fits && MeshEngine.lora?.connected == true) runOnUiThread { Toast.makeText(context, "Too long for LoRa: it will travel only over Bluetooth/Wi-Fi", Toast.LENGTH_LONG).show() }
                     }.start() }
                 } })
@@ -108,14 +113,27 @@ class MainActivity : Activity() {
             } })
             addView(radios)
         }
+        boardStatus = label("").apply { setTextIsSelectable(true); setTextColor(Color.rgb(120, 220, 140)) }
+        boardButton = Button(this).apply { setOnClickListener {
+            if (WifiBoard.running) WifiBoard.stop() else WifiBoard.start(this@MainActivity) { MeshEngine.notifyUi() }
+            refresh()
+        } }
+        val share = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; visibility = View.GONE
+            addView(label("Give Blackout to another Android phone without internet, with Quick Share or Bluetooth."))
+            addView(Button(context).apply { text = "Share the app"; setOnClickListener { ApkShare.share(this@MainActivity) } })
+            addView(label("\nWi-Fi board: people without the app join this phone's Wi-Fi network and read and post Public messages in their browser."))
+            addView(boardButton); addView(boardStatus)
+        }
         val lan = LanTest.panel(this)?.apply { visibility = View.GONE } // null in release builds
-        val pages = listOfNotNull(chat, ai, radio, lan)
+        val pages = listOfNotNull(chat, ai, radio, share, lan)
         fun show(v: View) = pages.forEach { it.visibility = if (it === v) View.VISIBLE else View.GONE }
         val tabs = LinearLayout(this).apply {
             gravity = Gravity.CENTER
             addView(Button(context).apply { text = "Chat"; setOnClickListener { show(chat) } })
             addView(Button(context).apply { text = "AI"; setOnClickListener { show(ai); refreshAi() } })
             addView(Button(context).apply { text = "Radio"; setOnClickListener { show(radio) } })
+            addView(Button(context).apply { text = "Share"; setOnClickListener { show(share) } })
             lan?.let { v -> addView(Button(context).apply { text = "LAN test"; setOnClickListener { show(v) } }) }
         }
         setContentView(col().apply {
@@ -144,8 +162,10 @@ class MainActivity : Activity() {
         val peers = (if (MeshEngine.lora?.connected == true) n - 1 else n) - LanTest.linkCount() - (ble?.linkCount() ?: 0)
         status.text = (if (peers > 0) "Phones connected: $peers" else MeshEngine.transportStatus + " · no phones connected") + "\n" +
             (ble?.statusLine() ?: "Bluetooth LE: off") + "\n" + lora + (LanTest.statusLine()?.let { "\n$it" } ?: "")
-        log.text = MeshEngine.snapshot().takeLast(300).joinToString("\n\n") { "${fmt.format(Date(it.ts))}  ${if (it.sender == MeshEngine.deviceId) "You" else it.name}\n${it.text}" }
+        log.text = MeshEngine.snapshot().takeLast(300).joinToString("\n\n") { "${fmt.format(Date(it.ts))}  ${if (it.public) "[Public] " else ""}${if (it.sender == MeshEngine.deviceId) "You" else it.name}\n${it.text}" }
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        boardButton.text = if (WifiBoard.running) "Stop the Wi-Fi board" else "Start the Wi-Fi board"
+        boardStatus.text = WifiBoard.status.takeIf { it != "Off" } ?: ""
     }
     override fun onDestroy() { MeshEngine.listener = null; super.onDestroy() }
 }

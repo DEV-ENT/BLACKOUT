@@ -10,7 +10,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **Mesh forwarding.** Every phone stores messages and passes them on to the phones it meets:
   - Duplicates are dropped.
   - Each message can be relayed up to 16 times.
-  - Each phone keeps up to 500 messages, for 7 days.
+  - Each phone passes on up to 500 messages, for 7 days. Messages stay readable on the phone until the app is deleted.
 - **Ways phones connect:**
 
   | Connection | Android | iPhone |
@@ -23,6 +23,10 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **AI that runs on the phone.** It needs no internet once its model is downloaded.
   - **iPhone:** runs on llama.cpp. You pick the model in the app, and it keeps the conversation as context.
   - **Android:** runs Qwen 2.5 1.5B on MediaPipe.
+- **Public channel.** Anyone with Blackout can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
+- **Android extras:**
+  - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.
+  - **Wi-Fi board:** the phone opens its own Wi-Fi network and a web page, so people without the app can read and post Public messages from a browser.
 - **LAN test mode (debug builds only).** Emulators and simulators can exchange real app traffic over TCP. This tests chat, relaying and encryption, but not Bluetooth.
 
 ## Repository layout
@@ -80,7 +84,7 @@ The app downloads a model once, while internet is available, and checks its SHA-
 |---|---|---|
 | Qwen 2.5 1.5B Instruct | 1.1 GB | Apache 2.0 |
 | Llama 3.2 3B Instruct | 2.0 GB | Llama 3.2 Community License (Built with Llama) |
-| Qwen 2.5 3B Instruct | 2.1 GB | Qwen Research License (non-commercial only) |
+| Qwen 2.5 3B Instruct | 2.1 GB | Qwen Research License (non-commercial only), so debug builds only |
 
 Small models can be wrong. In a real medical emergency, use the AI's answers carefully.
 
@@ -93,13 +97,21 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - Two iPhone Simulators connecting over Apple peer-to-peer.
 - A real iPhone 15 exchanging messages with a Mac over real Bluetooth LE.
 - The AI running on a real iPhone 15.
+- On a real iPhone 15, over real Bluetooth LE: messages arrive while the phone is locked, and the link comes back after the other side restarts.
+- Relaying across groups, and the Public channel, between a real iPhone and a Mac.
+- On an Android emulator: the Wi-Fi board (its own Wi-Fi network, the page in a browser, posting in both directions), and the share sheet for sharing the app.
 
 **Not verified yet:**
-- Android on real phones.
+- Android on real phones, including sending the app to another phone and a real phone joining the Wi-Fi board.
 - iPhone and Android over real Bluetooth.
 - iPhone to iPhone on real devices.
 - LoRa with real Meshtastic radios.
 - Battery use and range.
+
+## Privacy and TestFlight
+
+- Privacy policy: [PRIVACY.md](PRIVACY.md). Blackout has no servers and collects no data.
+- How to put the iPhone app on TestFlight: [docs/TESTFLIGHT.md](docs/TESTFLIGHT.md).
 
 ## Known limits
 

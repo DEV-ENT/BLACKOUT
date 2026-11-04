@@ -123,21 +123,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		B1AC00000000000000000031 /* Check llama.framework */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Check llama.framework";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Real-iPhone builds link llama.cpp, which is not committed (75 MB). Fail early with a clear message if it is missing.\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ] && [ ! -d \"$PROJECT_DIR/Vendor/llama.framework\" ]; then\n  echo \"error: llama.framework is missing: run ios/Vendor/fetch-llama.sh once\"\n  exit 1\nfi\n";
-		};
 		B1AC00000000000000000030 /* Embed llama.framework */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -152,6 +137,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# llama.cpp (Vendor/fetch-llama.sh) has only an iPhone build, so it is linked and embedded only for real devices.\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ]; then\n  set -e\n  if [ ! -d \"$PROJECT_DIR/Vendor/llama.framework\" ]; then echo \"error: llama.framework missing: run ios/Vendor/fetch-llama.sh once\"; exit 1; fi\n  DEST=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\n  mkdir -p \"$DEST\"\n  rsync -a --delete \"$PROJECT_DIR/Vendor/llama.framework\" \"$DEST/\"\n  if [ -n \"$EXPANDED_CODE_SIGN_IDENTITY\" ]; then\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --preserve-metadata=identifier,entitlements \"$DEST/llama.framework\"\n  fi\nfi\n";
+		};
+		B1AC00000000000000000031 /* Check llama.framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Check llama.framework";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Real-iPhone builds link llama.cpp, which is not committed (75 MB). Fail early with a clear message if it is missing.\nif [ \"$PLATFORM_NAME\" = \"iphoneos\" ] && [ ! -d \"$PROJECT_DIR/Vendor/llama.framework\" ]; then\n  echo \"error: llama.framework is missing: run ios/Vendor/fetch-llama.sh once\"\n  exit 1\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -264,10 +264,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Blackout-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
@@ -281,7 +283,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3;
+				MARKETING_VERSION = 0.4;
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"-framework",
 					llama,
@@ -297,10 +299,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Blackout-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
@@ -314,7 +318,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3;
+				MARKETING_VERSION = 0.4;
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"-framework",
 					llama,

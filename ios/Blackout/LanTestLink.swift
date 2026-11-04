@@ -14,6 +14,7 @@ final class LanTestLink {
     private let onStatus: (String?) -> Void
     private var conn: NWConnection?
     private var linkId: String?
+    var linked: Bool { q.sync { linkId != nil } }
     private var gen = 0
     private var target = ""
     private var count = 0

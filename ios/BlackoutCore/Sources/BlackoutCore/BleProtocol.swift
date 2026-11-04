@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 /// Bluetooth LE link protocol (spec/FORMAT.md, "Bluetooth LE"). Pure logic, same as the Android BleProtocol.kt.
 public enum BleProtocol {
@@ -12,11 +11,8 @@ public enum BleProtocol {
 
     public enum StreamError: Error { case badType(UInt8), badLength(Int) }
 
-    /// First 16 bytes of SHA-256("ble:" + NFC(code)), so only the same group finds each other.
-    public static func serviceUUID(code: String) -> UUID {
-        let h = [UInt8](SHA256.hash(data: Data(("ble:" + code.precomposedStringWithCanonicalMapping).utf8)))
-        return UUID(uuid: (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8], h[9], h[10], h[11], h[12], h[13], h[14], h[15]))
-    }
+    /// The same for every Blackout device: all of them relay for each other, whatever their group.
+    public static let service = UUID(uuidString: "bec33cd5-a64e-4e1a-b8c1-868db67d0df3")!
 
     public static func frame(_ type: UInt8, _ payload: Data) -> Data {
         Data([type, UInt8(payload.count >> 8), UInt8(payload.count & 0xFF)]) + payload

@@ -1,4 +1,4 @@
-# Blackout wire format (v0.3, marker byte 0xB2)
+# Blackout wire format (v0.4, marker byte 0xB2)
 
 The Android and iPhone apps must produce and accept exactly these bytes.
 `test-vectors.txt` holds byte-exact examples; both apps' unit tests check against it.
@@ -34,6 +34,12 @@ Relays read only id, ts and ttl.
 
 A packet that fails to decrypt is still stored and forwarded. It just isn't shown.
 
+## Groups and the Public channel
+
+- **Every Blackout device relays for every other.** Devices connect to any Blackout device they find, whatever its group, and forward all packets. A group exists only through its code: only members can decrypt its messages.
+- **Public channel:** messages sealed with the code `blackout-public`, which everyone knows. Anyone can read and post them, including people without the app through the Wi-Fi board (Android). Apps show them marked as public.
+- **Reading:** a device tries its own group's key first, then the public key. A packet that opens with neither is relayed but not shown.
+
 ## Forwarding rules
 
 - **Flooding:** each packet goes to every connected peer except the one it came from.
@@ -45,7 +51,7 @@ A packet that fails to decrypt is still stored and forwarded. It just isn't show
 
 | Transport | Framing |
 |---|---|
-| Nearby Connections (Android only) | One `BYTES` payload per packet. |
+| Nearby Connections (Android only) | Service id `it.blackout.mesh.v1`, strategy `P2P_CLUSTER`. One `BYTES` payload per packet. |
 | LAN test mode (debug builds) | 4-byte length, then the packet. |
 | LoRa via Meshtastic | The packet is `Data.payload` on port 256 (`PRIVATE_APP`), broadcast on channel 0 with hop limit 3. The whole packet must be ≤ 233 bytes. |
 | Bluetooth LE (Android and iPhone) | See below. |
@@ -63,10 +69,9 @@ An iPhone in the background advertises in a way Android cannot see. It can still
 
 ### Service UUID
 
-Take the first 16 bytes of SHA-256 over the UTF-8 bytes of `ble:` + NFC(group code). Read them as a big-endian UUID. Only devices with the same group code find each other.
+`bec33cd5-a64e-4e1a-b8c1-868db67d0df3`, the same for every Blackout device (see "Groups and the Public channel").
 
 - **Advertisement:** connectable. It contains only this 128-bit service UUID, with no device name.
-- **Example:** see `kind: ble-service` in `test-vectors.txt`.
 
 ### Characteristics
 
@@ -117,6 +122,7 @@ Both sides reach the same decision. Either side may close the other link.
 
 - `0xB1`, v0.2: text fields used Java's modified UTF-8, and the code was not normalized.
 - `0xB2`, v0.3: standard UTF-8, NFC-normalized group code.
+- `0xB2`, v0.4: same packets. Discovery no longer depends on the group code (one Bluetooth LE service UUID, one Nearby service id, no Multipeer group filter), and the Public channel was added. v0.3 and v0.4 devices do not find each other.
 
 ## Apple peer-to-peer (iPhone to iPhone)
 
@@ -124,6 +130,6 @@ iPhones also connect to each other with MultipeerConnectivity, which uses Blueto
 
 - **Service type:** `blackout-mesh`. It is listed in the app's `NSBonjourServices`.
 - **Peer display name:** the node id.
-- **Discovery info:** `g` = hex of the first 8 bytes of SHA-256(UTF-8(`mc:` + NFC(group code))). Peers with a different `g` are ignored.
-- **Who invites:** the device with the smaller node id. The invitation context is the UTF-8 bytes of `g`, and invitations with a different context are declined.
+- **Discovery info:** `v` = `1`. Peers without it are ignored.
+- **Who invites:** the device with the smaller node id. The invitation context is the UTF-8 bytes of `blackout-mesh-v1`, and invitations with a different context are declined.
 - **Messages:** each packet is sent as one `.reliable` message.

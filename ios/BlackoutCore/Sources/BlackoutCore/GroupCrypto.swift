@@ -8,9 +8,11 @@ public struct Message: Equatable, Sendable {
     public let sender: String
     public let name: String
     public let text: String
+    /// Sent on the Public channel (spec/FORMAT.md), readable by everyone.
+    public let isPublic: Bool
 
-    public init(id: String, ts: Int64, sender: String, name: String, text: String) {
-        self.id = id; self.ts = ts; self.sender = sender; self.name = name; self.text = text
+    public init(id: String, ts: Int64, sender: String, name: String, text: String, isPublic: Bool = false) {
+        self.id = id; self.ts = ts; self.sender = sender; self.name = name; self.text = text; self.isPublic = isPublic
     }
 }
 
@@ -18,6 +20,8 @@ public enum GroupCryptoError: Error { case fieldTooLong, badIv }
 
 /// Group encryption: everyone who knows the group code can read and write; relays without it cannot. See spec/FORMAT.md.
 public final class GroupCrypto: Sendable {
+    /// Code of the Public channel: everyone knows it, so anyone can read and post (spec/FORMAT.md).
+    public static let publicCode = "blackout-public"
     private let key: SymmetricKey
 
     public init(code: String) { key = SymmetricKey(data: GroupCrypto.deriveKey(code)) }

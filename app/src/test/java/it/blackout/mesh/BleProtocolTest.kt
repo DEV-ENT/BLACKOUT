@@ -2,17 +2,12 @@ package it.blackout.mesh
 
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.File
 
 class BleProtocolTest {
-    private fun unhex(s: String) = s.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
-    @Test fun serviceUuidMatchesVectors() {
-        val vs = File("../spec/test-vectors.txt").readText(Charsets.UTF_8).split(Regex("\n\\s*\n"))
-            .map { b -> b.lines().filter { it.isNotBlank() && !it.startsWith("#") }.associate { it.substringBefore(": ") to it.substringAfter(": ") } }
-            .filter { it["kind"] == "ble-service" }
-        assertEquals(3, vs.size)
-        vs.forEach { assertEquals(it["uuid"], BleProtocol.serviceUuid(String(unhex(it["code_hex"]!!), Charsets.UTF_8)).toString()) }
+    @Test fun serviceUuidIsTheSpecConstant() {
+        // spec/FORMAT.md: one service UUID for every Blackout device, whatever its group
+        assertEquals("bec33cd5-a64e-4e1a-b8c1-868db67d0df3", BleProtocol.SERVICE.toString())
     }
 
     @Test fun helloBytesAndParse() {

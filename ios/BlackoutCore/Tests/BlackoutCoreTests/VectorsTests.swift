@@ -22,7 +22,8 @@ final class VectorsTests: XCTestCase {
     }
 
     func testVectorFileHasAllKinds() {
-        XCTAssertEqual(of("kdf").count, 3); XCTAssertEqual(of("seal").count, 2)
+        XCTAssertEqual(of("kdf").count, 4) // includes the Public channel code
+        XCTAssertEqual(of("seal").count, 2)
     }
 
     func testKeyDerivationMatches() {

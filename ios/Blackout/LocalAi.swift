@@ -31,12 +31,21 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
                 license: "Llama 3.2 Community License · Built with Llama",
                 url: URL(string: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf")!,
                 bytes: 2_019_377_696, sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff", context: 2048),
+    ] + nonCommercial
+
+    /// Qwen 2.5 3B is under the Qwen Research License (non-commercial use only), so it is offered only in debug
+    /// builds and never ships in release builds (TestFlight, App Store).
+    #if DEBUG
+    private static let nonCommercial: [AiModel] = [
         AiModel(id: "qwen2.5-3b-instruct-q4_k_m.gguf", title: "Qwen 2.5 3B",
                 detail: "Better answers, about half as fast.",
                 license: "Qwen Research License: non-commercial use only",
                 url: URL(string: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf")!,
                 bytes: 2_104_932_768, sha256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d", context: 4096),
     ]
+    #else
+    private static let nonCommercial: [AiModel] = []
+    #endif
 
     static let instructions = """
         You are the offline assistant of Blackout, a messaging app used during a blackout. Internet, phone lines and \

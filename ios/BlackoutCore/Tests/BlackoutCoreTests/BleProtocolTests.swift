@@ -3,13 +3,9 @@ import XCTest
 
 /// Same checks as the Android BleProtocolTest, so both sides speak the same Bluetooth LE protocol.
 final class BleProtocolTests: XCTestCase {
-    func testServiceUuidMatchesVectors() {
-        let vs = VectorsTests.vectors.filter { $0["kind"] == "ble-service" }
-        XCTAssertEqual(vs.count, 3)
-        for v in vs {
-            let code = String(decoding: Hex.decode(v["code_hex"]!), as: UTF8.self)
-            XCTAssertEqual(BleProtocol.serviceUUID(code: code).uuidString.lowercased(), v["uuid"])
-        }
+    func testServiceUuidIsTheSpecConstant() {
+        // spec/FORMAT.md: one service UUID for every Blackout device, whatever its group
+        XCTAssertEqual(BleProtocol.service.uuidString.lowercased(), "bec33cd5-a64e-4e1a-b8c1-868db67d0df3")
     }
 
     func testHelloBytesAndParse() {

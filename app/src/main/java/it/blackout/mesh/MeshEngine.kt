@@ -19,6 +19,7 @@ object MeshEngine {
     private val main = Handler(Looper.getMainLooper())
     private var db: SQLiteDatabase? = null
     private var crypto: GroupCrypto? = null
+    private var publicCrypto: GroupCrypto? = null
     private val messages = ArrayList<Message>()
     @Volatile var router: MeshRouter? = null; private set
     var sender: ((String, Packet) -> Unit)? = null
@@ -35,12 +36,13 @@ object MeshEngine {
         deviceId = prefs.getString("device", null) ?: UUID.randomUUID().toString().take(12).also { prefs.edit().putString("device", it).apply() }
         this.name = name
         val cr = GroupCrypto(code); crypto = cr
+        publicCrypto = GroupCrypto(GroupCrypto.PUBLIC_CODE)
         val d = Db(c.applicationContext).writableDatabase; db = d
         val all = ArrayList<Packet>()
         d.rawQuery("SELECT id,ts,ttl,cipher FROM p ORDER BY ts", null).use { q ->
             while (q.moveToNext()) all += Packet(q.getString(0), q.getLong(1), q.getInt(2), q.getBlob(3))
         }
-        synchronized(messages) { all.forEach { p -> cr.open(p)?.let { messages += it } } }
+        synchronized(messages) { all.forEach { p -> read(p)?.let { messages += it } } }
         router = MeshRouter(send = { peer, p -> sender?.invoke(peer, p) }, deliver = ::onDeliver).also { it.restore(all) }
         notifyUi()
     }
@@ -52,15 +54,23 @@ object MeshEngine {
     }
     private fun onDeliver(p: Packet) {
         save(p)
-        crypto?.open(p)?.let { m -> synchronized(messages) { messages += m; messages.sortBy { it.ts } } }
+        read(p)?.let { m -> synchronized(messages) { messages += m; messages.sortBy { it.ts } } }
         notifyUi()
     }
-    /** Returns false if the message is too long for a LoRa packet. */
-    fun send(text: String): Boolean {
-        val cr = crypto ?: return true; val r = router ?: return true
+    /** This group's message, else a Public channel message, else null (relayed but not shown). */
+    private fun read(p: Packet): Message? = crypto?.open(p) ?: publicCrypto?.open(p)?.copy(public = true)
+
+    /** Returns false if the message is too long for a LoRa packet. [public]: send on the Public channel. */
+    fun send(text: String, public: Boolean = false): Boolean = post(deviceId, name, text, public)
+
+    /** A Public message typed on the Wi-Fi board by someone without the app (WifiBoard.kt). */
+    fun sendFromBoard(who: String, text: String) { post("web-$deviceId", "$who (Wi-Fi board)", text, public = true) }
+
+    private fun post(senderId: String, from: String, text: String, public: Boolean): Boolean {
+        val cr = (if (public) publicCrypto else crypto) ?: return true; val r = router ?: return true
         val id = Packet.newId(); val ts = System.currentTimeMillis()
-        val p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, deviceId, name, text))
-        save(p); synchronized(messages) { messages += Message(id, ts, deviceId, name, text) }
+        val p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, senderId, from, text))
+        save(p); synchronized(messages) { messages += Message(id, ts, senderId, from, text, public) }
         r.publish(p); notifyUi()
         return Meshtastic.fits(p)
     }

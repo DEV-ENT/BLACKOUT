@@ -45,8 +45,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     private var nextId = 0
     private var note = ""
 
-    init(code: String, nodeId: String, router: MeshRouter, onStatus: @escaping (String) -> Void) {
-        service = CBUUID(nsuuid: BleProtocol.serviceUUID(code: code))
+    init(nodeId: String, router: MeshRouter, onStatus: @escaping (String) -> Void) {
+        service = CBUUID(nsuuid: BleProtocol.service) // the same for every Blackout device
         self.nodeId = nodeId; self.router = router; self.onStatus = onStatus
         super.init()
     }
@@ -257,6 +257,13 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     private func dropAll(central: Bool) { for l in links.values where l.isCentral == central { drop(l) } }
     private func setNote(_ n: String) { note = n; report() }
     private func report() {
-        onStatus("Bluetooth LE: \(links.values.filter(\.up).count) link(s)" + (note.isEmpty ? "" : " · \(note)"))
+        let up = links.values.filter(\.up)
+        nodeLock.lock(); _nodes = up.compactMap(\.remote); nodeLock.unlock()
+        onStatus("Bluetooth LE: \(up.count) link(s)" + (note.isEmpty ? "" : " · \(note)"))
     }
+
+    /// Node ids of the devices linked right now. Safe from any thread.
+    var nodes: [String] { nodeLock.lock(); defer { nodeLock.unlock() }; return _nodes }
+    private let nodeLock = NSLock()
+    private var _nodes: [String] = []
 }

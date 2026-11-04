@@ -37,7 +37,7 @@ import android.util.Log
  * All state is touched only on the [h] thread; Android callbacks are moved there first.
  */
 @SuppressLint("MissingPermission")
-class BleLink(private val ctx: Context, code: String, private val nodeId: String) {
+class BleLink(private val ctx: Context, private val nodeId: String) {
     companion object {
         const val PREFIX = "ble:"
         private const val TAG = "BlackoutBle"
@@ -61,7 +61,7 @@ class BleLink(private val ctx: Context, code: String, private val nodeId: String
 
     private val h = Handler(HandlerThread("ble").apply { start() }.looper)
     private val manager: BluetoothManager? = ctx.getSystemService(BluetoothManager::class.java)
-    private val service = BleProtocol.serviceUuid(code)
+    private val service = BleProtocol.SERVICE
     private val links = HashMap<String, Link>()     // link id -> link
     private val retryAt = HashMap<String, Long>()   // address -> earliest time to dial it again
     private val nodeOf = HashMap<String, String>()  // address we dialed -> node id it reported

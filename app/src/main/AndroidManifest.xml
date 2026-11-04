@@ -20,5 +20,7 @@
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
         <service android:name=".MeshService" android:exported="false" android:foregroundServiceType="connectedDevice"/>
+        <!-- Serves this app's APK read-only so it can be shared offline (ApkShare.kt). -->
+        <provider android:name=".ApkProvider" android:authorities="it.blackout.mesh.apk" android:exported="false" android:grantUriPermissions="true"/>
     </application>
 </manifest>

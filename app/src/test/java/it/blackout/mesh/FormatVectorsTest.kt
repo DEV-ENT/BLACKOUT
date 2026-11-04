@@ -18,7 +18,7 @@ class FormatVectorsTest {
     private fun code(v: Map<String, String>) = v["code"] ?: String(unhex(v["code_hex"]!!), Charsets.UTF_8)
 
     @Test fun vectorFileHasAllKinds() {
-        assertEquals(3, vectors.count { it["kind"] == "kdf" })
+        assertEquals(4, vectors.count { it["kind"] == "kdf" }) // includes the Public channel code
         assertEquals(2, vectors.count { it["kind"] == "seal" })
     }
 

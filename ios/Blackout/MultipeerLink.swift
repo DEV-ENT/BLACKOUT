@@ -1,6 +1,5 @@
 import Foundation
 import MultipeerConnectivity
-import CryptoKit
 import BlackoutCore
 
 /// iPhone-to-iPhone link over Apple peer-to-peer (Bluetooth and Wi-Fi), spec/FORMAT.md "Apple peer-to-peer".
@@ -12,17 +11,16 @@ final class MultipeerLink: NSObject, MCSessionDelegate, MCNearbyServiceAdvertise
     private let session: MCSession
     private let advertiser: MCNearbyServiceAdvertiser
     private let browser: MCNearbyServiceBrowser
-    private let group: String
+    private static let context = Data("blackout-mesh-v1".utf8)
     private let router: MeshRouter
     private let onStatus: (String) -> Void
     private var found: [String: MCPeerID] = [:] // node id -> peer currently in range (q only)
 
-    init(code: String, nodeId: String, router: MeshRouter, onStatus: @escaping (String) -> Void) {
-        group = SHA256.hash(data: Data(("mc:" + code.precomposedStringWithCanonicalMapping).utf8))
-            .prefix(8).map { String(format: "%02x", $0) }.joined()
+    /// Connects to every Blackout iPhone, whatever its group: all relay for each other (spec/FORMAT.md).
+    init(nodeId: String, router: MeshRouter, onStatus: @escaping (String) -> Void) {
         me = MCPeerID(displayName: nodeId)
         session = MCSession(peer: me, securityIdentity: nil, encryptionPreference: .required)
-        advertiser = MCNearbyServiceAdvertiser(peer: me, discoveryInfo: ["g": group], serviceType: Self.serviceType)
+        advertiser = MCNearbyServiceAdvertiser(peer: me, discoveryInfo: ["v": "1"], serviceType: Self.serviceType)
         browser = MCNearbyServiceBrowser(peer: me, serviceType: Self.serviceType)
         self.router = router; self.onStatus = onStatus
         super.init()
@@ -47,12 +45,12 @@ final class MultipeerLink: NSObject, MCSessionDelegate, MCNearbyServiceAdvertise
     /// Only the phone with the smaller node id invites, so two phones never invite each other at once.
     private func invite(_ peer: MCPeerID) {
         guard me.displayName < peer.displayName, !session.connectedPeers.contains(peer) else { return }
-        browser.invitePeer(peer, to: session, withContext: Data(group.utf8), timeout: 20)
+        browser.invitePeer(peer, to: session, withContext: Self.context, timeout: 20)
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
         q.async {
-            guard info?["g"] == self.group else { return } // another group
+            guard info?["v"] == "1" else { return } // not a Blackout v0.4 iPhone
             self.found[peerID.displayName] = peerID
             self.invite(peerID)
         }
@@ -68,7 +66,7 @@ final class MultipeerLink: NSObject, MCSessionDelegate, MCNearbyServiceAdvertise
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(context == Data(group.utf8), session)
+        invitationHandler(context == Self.context, session)
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
@@ -105,4 +103,7 @@ final class MultipeerLink: NSObject, MCSessionDelegate, MCNearbyServiceAdvertise
                  at localURL: URL?, withError error: Error?) {}
 
     private func report() { onStatus("Nearby iPhones: \(session.connectedPeers.count) connected") }
+
+    /// Node ids of the iPhones linked right now.
+    var nodes: [String] { session.connectedPeers.map(\.displayName) }
 }

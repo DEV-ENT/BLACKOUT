@@ -34,7 +34,7 @@ class MeshService : Service() {
             started = true
             io.execute {
                 MeshEngine.start(this, name, code)
-                ui.post { begin(code) }
+                ui.post { begin() }
             }
         }
         return START_REDELIVER_INTENT
@@ -42,11 +42,11 @@ class MeshService : Service() {
 
     private fun status(s: String) { MeshEngine.transportStatus = s; MeshEngine.notifyUi() }
 
-    private fun begin(code: String) {
-        svc = GroupCrypto.serviceId(code)
+    private fun begin() {
+        svc = "it.blackout.mesh.v1" // the same for every Blackout phone: all relay for each other (spec/FORMAT.md)
         client = Nearby.getConnectionsClient(this)
         val lora = LoraLink(this); MeshEngine.lora = lora; lora.start()
-        val ble = BleLink(this, code, MeshEngine.deviceId); MeshEngine.ble = ble
+        val ble = BleLink(this, MeshEngine.deviceId); MeshEngine.ble = ble
         MeshEngine.sender = { peer, p ->
             when {
                 peer == LoraLink.PEER -> lora.offer(p)
