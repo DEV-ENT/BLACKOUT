@@ -87,6 +87,13 @@ object MeshEngine {
         notifyUi()
     }
 
+    /** Turns "Connect through Tor" on or off (Connections screen): the relays link again, through Orbot or not. */
+    @Synchronized fun setTor(on: Boolean) {
+        val c = app ?: return
+        Tor.setEnabled(c, on)
+        if (nostr != null) setInternet(true) else notifyUi()
+    }
+
     /** This phone's relay mailboxes: its group's and the Public channel's (spec/FORMAT.md, "Mailboxes"). */
     private fun mailboxes(): Set<Int> = setOfNotNull(crypto?.mailbox, publicCrypto?.mailbox)
 

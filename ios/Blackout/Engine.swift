@@ -32,6 +32,7 @@ final class Engine: ObservableObject {
     @Published private(set) var radioLinked = false
     @Published private(set) var meshcoreLinked = false
     @Published private(set) var relaysLinked = 0     // internet relays connected right now (NostrLink)
+    @Published private(set) var throughTor: Bool?    // "Connect through Tor": true when checked, false while waiting
     @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
     @Published private(set) var name: String
     @Published private(set) var deliveries = Deliveries()  // who confirmed which message (spec/FORMAT.md, "Delivery receipts")
@@ -79,7 +80,7 @@ final class Engine: ObservableObject {
         meshcore = MeshCoreLink(router: router) { [weak self] s in self?.setStatus("3b-meshcore", s) }
         wifi = WifiLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("4-wifi", s) }
         if d.object(forKey: "wifiNetwork") as? Bool ?? true { wifi.start() }
-        nostr = NostrLink(router: router, mailboxes: { [weak self] in self?.mailboxes() ?? [] }) { [weak self] s in
+        nostr = NostrLink(router: router, viaTor: d.bool(forKey: "tor"), mailboxes: { [weak self] in self?.mailboxes() ?? [] }) { [weak self] s in
             self?.setStatus("5-internet", s)
         }
         if d.object(forKey: "internet") as? Bool ?? true { nostr.start() }
@@ -105,6 +106,19 @@ final class Engine: ObservableObject {
     func setInternet(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: "internet")
         if on { nostr.start() } else { nostr.stop() }
+    }
+
+    /// Turns "Connect through Tor" on or off (Connections screen), and remembers it.
+    func setTor(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "tor")
+        nostr.setTor(on)
+    }
+
+    /// Opens Orbot (it then starts its Tor VPN), or its download page if it isn't installed.
+    func openOrbot() {
+        UIApplication.shared.open(URL(string: "https://orbot.app/rc/start")!, options: [.universalLinksOnly: true]) { opened in
+            if !opened { UIApplication.shared.open(URL(string: "https://orbot.app/download/")!) }
+        }
     }
 
     /// This phone's relay mailboxes: its group's and the Public channel's (spec/FORMAT.md, "Mailboxes").
@@ -192,6 +206,7 @@ final class Engine: ObservableObject {
             self.linkedNodes = all
             self.phones = all.count; self.radioLinked = self.lora.connected; self.meshcoreLinked = self.meshcore.connected
             self.relaysLinked = self.nostr?.connected ?? 0
+            self.throughTor = self.nostr?.throughTor
         }
     }
 

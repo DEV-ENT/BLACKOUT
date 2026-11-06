@@ -10,6 +10,8 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     static let peer = "nostr"
     /// Free public relays that stored a 22 KB event of this kind from a new key (tested 2026-11-06).
     static let relays = ["wss://nos.lol", "wss://relay.damus.io", "wss://relay.primal.net", "wss://nostr.mom", "wss://nostr.oxtr.dev", "wss://relay.ditto.pub"]
+    /// Through Tor: nos.lol and nostr.mom don't answer Tor exits (tested 2026-11-06), so two others take their place.
+    static let torRelays = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nostr.oxtr.dev", "wss://relay.ditto.pub", "wss://relay.nostr.net", "wss://nostr.data.haus"]
     private static let tick = 1.5           // at most one own packet per tick
     private static let bridgeEvery = 3      // and one bridged packet every 3 ticks
     private static let checkEvery = 10.0    // how often to ask relays which bridged packets they have
@@ -41,9 +43,14 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     private var ticks = 0
     private var sub = "dp" + String(UInt64(Date().timeIntervalSince1970 * 1000), radix: 36)
     private var timers: [DispatchSourceTimer] = []
+    private var viaTor: Bool
+    private var torOK: Bool?            // with Tor: whether the last check said traffic leaves through Tor; nil without
+    private var torCheckedAt = Date.distantPast
+    private var torChecking = false
 
-    init(router: MeshRouter, mailboxes: @escaping () -> [UInt16], onStatus: @escaping (String?) -> Void) {
-        self.router = router; self.mailboxes = mailboxes; self.onStatus = onStatus
+    init(router: MeshRouter, viaTor: Bool, mailboxes: @escaping () -> [UInt16], onStatus: @escaping (String?) -> Void) {
+        self.router = router; self.viaTor = viaTor; self.mailboxes = mailboxes; self.onStatus = onStatus
+        torOK = viaTor ? false : nil
         super.init()
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = false
@@ -52,27 +59,39 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
 
     var isUp: Bool { q.sync { up } }
     var connected: Int { q.sync { open.count } }
-    var total: Int { Self.relays.count }
+    var total: Int { Self.relays.count } // the Tor list is as long
+    private var relays: [String] { viaTor ? Self.torRelays : Self.relays }
+    /// With "Connect through Tor": true while traffic is known to leave through Tor, false while waiting. Nil without.
+    var throughTor: Bool? { q.sync { torOK } }
 
-    func start() {
+    func start() { q.async { self.startNow() } }
+    func stop() { q.async { self.stopNow() } }
+
+    /// Turns "Connect through Tor" on or off: drops every relay link and links again.
+    func setTor(_ on: Bool) {
         q.async {
-            guard !self.running else { return }
-            self.running = true
-            Self.relays.forEach(self.connect)
-            self.timers = [self.every(Self.tick) { $0.pump() }, self.every(Self.checkEvery) { $0.check() }]
-            self.report()
+            let was = self.running
+            self.stopNow()
+            self.viaTor = on; self.torOK = on ? false : nil; self.torCheckedAt = .distantPast
+            if was { self.startNow() } else { self.report() }
         }
     }
 
-    func stop() {
-        q.async {
-            self.running = false
-            self.timers.forEach { $0.cancel() }; self.timers = []
-            self.tasks.values.forEach { $0.cancel(with: .goingAway, reason: nil) }
-            self.tasks = [:]; self.open = []
-            if self.up { self.up = false; self.router.peerDown(Self.peer) }
-            self.report()
-        }
+    private func startNow() {
+        guard !running else { return }
+        running = true
+        relays.forEach(connect)
+        timers = [every(Self.tick) { $0.pump() }, every(Self.checkEvery) { $0.check() }]
+        report()
+    }
+
+    private func stopNow() {
+        running = false
+        timers.forEach { $0.cancel() }; timers = []
+        tasks.values.forEach { $0.cancel(with: .goingAway, reason: nil) }
+        tasks = [:]; open = []
+        if up { up = false; router.peerDown(Self.peer) }
+        report()
     }
 
     private func every(_ s: Double, _ f: @escaping (NostrLink) -> Void) -> DispatchSourceTimer {
@@ -104,10 +123,35 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
+    // MARK: - Tor
+
+    /// Asks the Tor Project whether traffic leaves through Tor; links to the relays if so, else asks again soon.
+    private func checkTor() {
+        guard running, !torChecking else { return }
+        torChecking = true
+        var r = URLRequest(url: TorCheck.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        r.httpShouldHandleCookies = false
+        URLSession(configuration: .ephemeral).dataTask(with: r) { [weak self] data, _, _ in
+            guard let self else { return }
+            self.q.async {
+                self.torChecking = false
+                guard self.running, self.viaTor else { return }
+                let ok = data.map(TorCheck.isTor) ?? false
+                self.torOK = ok
+                if ok { self.torCheckedAt = Date(); self.relays.forEach(self.connect) }
+                else { self.q.asyncAfter(deadline: .now() + 15) { [weak self] in self?.checkTor() } }
+                self.report()
+            }
+        }.resume()
+    }
+
     // MARK: - Sockets
 
     private func connect(_ url: String) {
-        guard running, let u = URL(string: url) else { return }
+        guard running, let u = URL(string: url), tasks[url] == nil else { return }
+        // With Tor (Orbot's VPN), only connect after a recent check that traffic leaves through Tor: if the VPN went
+        // off, links would otherwise go out directly.
+        if viaTor && (torOK != true || Date().timeIntervalSince(torCheckedAt) > 60) { checkTor(); return }
         let t = session.webSocketTask(with: u)
         t.maximumMessageSize = 1 << 20
         tasks[url] = t
@@ -164,6 +208,7 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
         guard tasks[url] === t else { return }
         tasks[url] = nil; open.remove(url)
         if open.isEmpty && up { up = false; router.peerDown(Self.peer) }
+        if open.isEmpty && torOK == true { torOK = false } // Orbot's VPN may be off: check again before linking
         report()
         guard running else { return }
         let wait = min((backoff[url] ?? 2.5) * 2, 120) // no internet: try again, less and less often
@@ -229,6 +274,8 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     }
 
     private func report() {
-        onStatus(running ? "Internet: \(open.count) of \(Self.relays.count) relays" : nil)
+        guard running else { return onStatus(nil) }
+        onStatus(torOK == false ? "Internet: waiting for Tor"
+                 : "Internet: \(open.count) of \(relays.count) relays" + (torOK == true ? " through Tor" : ""))
     }
 }

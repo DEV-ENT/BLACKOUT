@@ -48,6 +48,13 @@ class NostrTest {
         assertEquals(2, have.getInt("limit"))
     }
 
+    @Test fun readsTorCheck() {
+        assertTrue(Tor.isTor("{\"IsTor\":true,\"IP\":\"185.220.101.1\"}"))
+        assertFalse(Tor.isTor("{\"IsTor\":false,\"IP\":\"1.2.3.4\"}"))
+        assertFalse(Tor.isTor("<html>blocked</html>"))
+        assertFalse(Tor.isTor("{}"))
+    }
+
     @Test fun recognizesRefusals() {
         assertEquals("banned: too many rate-limit violations", Nostr.refusal("[\"OK\",\"ab\",false,\"banned: too many rate-limit violations\"]"))
         assertNull(Nostr.refusal("[\"OK\",\"ab\",true,\"duplicate: have it\"]"))

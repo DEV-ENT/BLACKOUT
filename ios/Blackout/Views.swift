@@ -929,6 +929,7 @@ struct ConnectionsView: View {
     @ObservedObject var engine: Engine
     @AppStorage("wifiNetwork") private var wifiOn = true
     @AppStorage("internet") private var internetOn = true
+    @AppStorage("tor") private var torOn = false
     @AppStorage("name") private var myName = ""
     @State private var address = ""
     @State private var share: ShareText?
@@ -967,6 +968,7 @@ struct ConnectionsView: View {
         }
         .onChange(of: wifiOn) { on in engine.setWifi(on) }
         .onChange(of: internetOn) { on in engine.setInternet(on) }
+        .onChange(of: torOn) { on in engine.setTor(on) }
         .sheet(item: $share) { s in ActivityView(items: [s.text]).ignoresSafeArea() }
     }
 
@@ -980,8 +982,21 @@ struct ConnectionsView: View {
                 .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             if internetOn {
                 let n = engine.relaysLinked
-                Text(n > 0 ? "Connected to \(n) of \(engine.nostr.total) relays" : "No internet right now: the other ways keep working")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(n > 0 ? Theme.safe : Theme.dim)
+                if engine.throughTor == false {
+                    Text("Waiting for Tor: open Orbot and turn it on")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                } else {
+                    Text(n > 0 ? "Connected to \(n) of \(engine.nostr.total) relays" + (engine.throughTor == true ? " through Tor" : "")
+                               : "No internet right now: the other ways keep working")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(n > 0 ? Theme.safe : Theme.dim)
+                }
+                Toggle(isOn: $torOn) {
+                    Text("Connect through Tor").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                }
+                .tint(Theme.safe)
+                Text("Relays then can't see your internet address. Needs the free Orbot app with its VPN on. Slower, and some relays refuse Tor. Nothing goes to the relays until DarkProof has checked that Tor is working.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                if torOn { Button("Open Orbot") { engine.openOrbot() }.buttonStyle(GhostButton()) }
             }
         }
     }

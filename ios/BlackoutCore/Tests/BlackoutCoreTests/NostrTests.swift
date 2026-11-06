@@ -46,6 +46,13 @@ final class NostrTests: XCTestCase {
         XCTAssertEqual(hf["#x"] as? [String], ["a8d0000000000001", "07940000000000ff"]); XCTAssertEqual(hf["limit"] as? Int, 2)
     }
 
+    func testTorCheck() {
+        XCTAssertTrue(TorCheck.isTor(Data(#"{"IsTor":true,"IP":"185.220.101.1"}"#.utf8)))
+        XCTAssertFalse(TorCheck.isTor(Data(#"{"IsTor":false,"IP":"1.2.3.4"}"#.utf8)))
+        XCTAssertFalse(TorCheck.isTor(Data("<html>blocked</html>".utf8)))
+        XCTAssertFalse(TorCheck.isTor(Data("{}".utf8)))
+    }
+
     func testRefusals() {
         XCTAssertEqual(Nostr.refusal("[\"OK\",\"ab\",false,\"banned: too many rate-limit violations\"]"), "banned: too many rate-limit violations")
         XCTAssertNil(Nostr.refusal("[\"OK\",\"ab\",true,\"duplicate: have it\"]"))

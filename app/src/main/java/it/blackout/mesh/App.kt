@@ -436,15 +436,23 @@ private fun ConnectionsSheet(s: AppState, a: MainActivity, close: () -> Unit) {
     }
 }
 
-/** Internet relays: on/off and how many answer. */
+/** Internet relays: on/off, how many answer, and "Connect through Tor". */
 @Composable
 private fun InternetCard() {
+    val ctx = LocalContext.current
     val n = MeshEngine.nostr
     Card {
         SwitchRow("Internet", n != null, { MeshEngine.setInternet(it) },
             "While there is Wi-Fi or mobile data, messages also travel through free public relays (Nostr), so friends far away get them and this phone passes on its neighbours' messages. In a blackout the other ways keep working. Group messages stay encrypted; relays see your internet address unless you use Tor.")
-        if (n != null) Txt(if (n.connected > 0) "Connected to ${n.connected} of ${n.total} relays" else "No internet right now: the other ways keep working",
-            15, FontWeight.SemiBold, if (n.connected > 0) Theme.safe else Theme.dim)
+        if (n != null) {
+            if (n.throughTor == false) Txt("Waiting for Tor: open Orbot and turn it on", 15, FontWeight.SemiBold, Theme.text)
+            else Txt(if (n.connected > 0) "Connected to ${n.connected} of ${n.total} relays" + (if (n.throughTor == true) " through Tor" else "")
+                     else "No internet right now: the other ways keep working",
+                15, FontWeight.SemiBold, if (n.connected > 0) Theme.safe else Theme.dim)
+            SwitchRow("Connect through Tor", Tor.enabled(ctx), { MeshEngine.setTor(it) },
+                "Relays then can't see your internet address. Needs the free Orbot app, turned on. Slower, and some relays refuse Tor. Nothing goes to the relays until DarkProof has checked that Tor is working.")
+            if (Tor.enabled(ctx)) GhostButton("Open Orbot") { Tor.openOrbot(ctx) }
+        }
     }
 }
 

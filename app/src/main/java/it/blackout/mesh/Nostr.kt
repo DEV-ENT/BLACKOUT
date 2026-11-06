@@ -124,6 +124,8 @@ class NostrLink(
         fun owns(peer: String) = peer == PEER
         /** Free public relays that stored a 22 KB event of this kind from a new key (tested 2026-11-06). */
         val RELAYS = listOf("wss://nos.lol", "wss://relay.damus.io", "wss://relay.primal.net", "wss://nostr.mom", "wss://nostr.oxtr.dev", "wss://relay.ditto.pub")
+        /** Through Tor: nos.lol and nostr.mom don't answer Tor exits (tested 2026-11-06), so two others take their place. */
+        val TOR_RELAYS = listOf("wss://relay.damus.io", "wss://relay.primal.net", "wss://nostr.oxtr.dev", "wss://relay.ditto.pub", "wss://relay.nostr.net", "wss://nostr.data.haus")
         private const val TICK_MS = 1_500L          // at most one own packet per tick
         private const val BRIDGE_EVERY = 3          // and one bridged packet every 3 ticks
         private const val CHECK_MS = 10_000L        // how often to ask relays which bridged packets they have
@@ -134,6 +136,7 @@ class NostrLink(
     }
 
     private val secret = Schnorr.newSecret() // a new throwaway key every start: relays can't link sessions
+    private val relays = if (proxy == null) RELAYS else TOR_RELAYS
     private val h = android.os.Handler(android.os.Looper.getMainLooper())
     private val client = okhttp3.OkHttpClient.Builder().pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
         .apply { proxy?.let(::proxy) }.build()
@@ -156,16 +159,20 @@ class NostrLink(
     private var sub = "dp" + System.nanoTime().toString(36)
     private var ticks = 0
     private var checking = false
+    private var torCheck = false // a Tor check is running
+
+    /** With Tor (a [proxy]): true once a check says traffic leaves through Tor, false while waiting. Null without. */
+    @Volatile var throughTor: Boolean? = if (proxy == null) null else false; private set
 
     val connected get() = open.size
     /** True while at least one relay is linked (it then counts as one peer for the router, not as a phone). */
     val isUp get() = up
-    val total get() = RELAYS.size
+    val total get() = relays.size
 
     fun start() {
         if (running) return
         running = true
-        RELAYS.forEach(::connect)
+        if (proxy == null) relays.forEach(::connect) else h.post(::waitForTor) // Tor checks run on the main thread
         h.postDelayed(::pump, TICK_MS)
         h.postDelayed(::check, CHECK_MS)
     }
@@ -202,8 +209,23 @@ class NostrLink(
         }
     }
 
+    /** Checks through the proxy that traffic leaves through Tor, then links to the relays; else tries again soon. */
+    private fun waitForTor() {
+        if (!running || torCheck) return
+        torCheck = true
+        Thread {
+            val ok = Tor.check(client)
+            h.post {
+                torCheck = false
+                if (!running) return@post
+                throughTor = ok; changed()
+                if (ok) relays.filter { !sockets.containsKey(it) }.forEach(::connect) else h.postDelayed(::waitForTor, 15_000)
+            }
+        }.start()
+    }
+
     private fun connect(url: String) {
-        if (!running) return
+        if (!running || (proxy != null && throughTor != true)) return // with Tor: only after the check
         val ws = client.newWebSocket(okhttp3.Request.Builder().url(url).build(), object : okhttp3.WebSocketListener() {
             override fun onOpen(ws: okhttp3.WebSocket, r: okhttp3.Response) {
                 open[url] = ws; backoff.remove(url)
@@ -233,6 +255,7 @@ class NostrLink(
         if (sockets[url] !== ws) return
         sockets.remove(url); open.remove(url)
         if (open.isEmpty() && up) { up = false; router()?.peerDown(PEER) }
+        if (open.isEmpty() && throughTor == true) { throughTor = false; h.post(::waitForTor) } // Orbot stopped? check again
         changed()
         if (!running) return
         val wait = ((backoff[url] ?: 2_500L) * 2).coerceAtMost(120_000L) // no internet: try again, less and less often
@@ -298,5 +321,9 @@ class NostrLink(
         if (done.isNotEmpty()) NostrReports.sent(ctx, done)
     }
 
-    fun statusLine(): String = if (!running) "Internet: off" else "Internet: $connected of $total relays"
+    fun statusLine(): String = when {
+        !running -> "Internet: off"
+        throughTor == false -> "Internet: waiting for Tor"
+        else -> "Internet: $connected of $total relays" + if (throughTor == true) " through Tor" else ""
+    }
 }

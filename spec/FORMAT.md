@@ -183,6 +183,22 @@ of any packet, so a phone can bridge packets it cannot open. Packets from older 
 - **Reports:** a reported Public message is hidden on the phone, and a NIP-56 report (kind 1984, tags
   `["e", <event id>, "other"]` and `["p", <author>]`) goes to the relays.
 
+### Tor
+
+"Connect through Tor" (off by default) hides the phone's internet address from the relays. Phones are Tor clients
+only, never relays. Both apps use the free Orbot app:
+
+- **Android:** every relay link and the check below go through Orbot's SOCKS proxy, `127.0.0.1:9050`. Host names are
+  resolved by Tor. If Orbot is off the links fail, so nothing goes out directly.
+- **iPhone:** Orbot runs Tor as a VPN for the whole phone. DarkProof opens `https://orbot.app/rc/start` to start it.
+- **Check:** before linking to any relay, the app fetches `https://check.torproject.org/api/ip` and goes on only if
+  the answer has `"IsTor": true`. Otherwise it asks again every 15 s. The iPhone asks again whenever all relays are
+  lost and before any new link more than 60 s after the last check, because a VPN can be turned off at any time.
+  With Tor off, that check may show the phone's address to the Tor Project.
+- **Relays through Tor:** `wss://relay.damus.io`, `wss://relay.primal.net`, `wss://nostr.oxtr.dev`,
+  `wss://relay.ditto.pub`, `wss://relay.nostr.net`, `wss://nostr.data.haus`. nos.lol and nostr.mom don't answer Tor
+  exits (tested 2026-11-06); the four relays in both lists carry messages between phones with and without Tor.
+
 ## Wi-Fi networks
 
 Phones on the same Wi-Fi network connect over TCP: a router with no internet, a phone hotspot, a community network or a

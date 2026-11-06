@@ -54,6 +54,8 @@ object DebugTools {
      * Simulator: adb forward tcp:7777 tcp:7777, then type 127.0.0.1:7777 in the iPhone's Wi-Fi network address field.
      */
     fun debugIntent(c: Context, i: Intent) {
+        i.getStringExtra("torProxy")?.let { c.getSharedPreferences("mesh", 0).edit().putString("torProxy", it).apply() } // e.g. 10.0.2.2:9050
+        i.getStringExtra("tor")?.let { Tor.setEnabled(c, it == "1"); if (MeshEngine.nostr != null) MeshEngine.setTor(it == "1") } // relink if already up
         i.getStringExtra("join")?.let { j ->
             c.getSharedPreferences("mesh", 0).edit().putString("name", j.substringBefore('|')).putString("code", j.substringAfter('|')).apply()
         }

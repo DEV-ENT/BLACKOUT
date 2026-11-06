@@ -98,3 +98,14 @@ public enum Nostr {
         (try? JSONSerialization.data(withJSONObject: o, options: [.withoutEscapingSlashes])).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
     }
 }
+
+/// "Connect through Tor" (spec/FORMAT.md, "Tor"): nothing goes to the relays until the Tor Project says this phone's
+/// traffic leaves through Tor.
+public enum TorCheck {
+    public static let url = URL(string: "https://check.torproject.org/api/ip")!
+
+    /// The answer looks like {"IsTor": true, "IP": …}.
+    public static func isTor(_ data: Data) -> Bool {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["IsTor"] as? Bool == true
+    }
+}
