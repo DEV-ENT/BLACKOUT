@@ -25,7 +25,7 @@ struct RootView: View {
                 Theme.bg.ignoresSafeArea().onAppear { engine = Engine(name: name, code: code) }
             }
         }
-        .tint(Theme.amber)
+        .tint(Theme.text)
         .onOpenURL { url in
             guard let i = Invite.parse(url) else { return }
             invite = PendingInvite(name: i.name, code: i.code)
@@ -38,7 +38,7 @@ struct RootView: View {
             }
             Button("Cancel", role: .cancel) { invite = nil }
         } message: { i in
-            Text("You'll see \(i.name)'s messages instead of \(groupName)'s. You can switch back in People > settings.")
+            Text("You'll see \(i.name)'s messages instead of \(groupName)'s. You can switch back in Settings.")
         }
     }
 }
@@ -51,8 +51,9 @@ struct SetupView: View {
     var invite: PendingInvite?
     /// name, group name, group code, and whether the group was just created
     let done: (String, String, String, Bool) -> Void
+    enum Mode { case welcome, create, join }
+    @State private var mode = Mode.welcome
     @State private var name = ""
-    @State private var joining = false
     @State private var groupName = ""
     @State private var code = ""
     @FocusState private var focus: Field?
@@ -63,90 +64,105 @@ struct SetupView: View {
     private var cleanCode: String { clean(code, 200) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Radar(phones: 3, radio: true).frame(width: 120, height: 120).frame(maxWidth: .infinity)
-                    .accessibilityHidden(true).padding(.top, 8)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 0) {
-                        Text("DARKPROOF").tracking(5)
-                        Cursor()
-                    }
-                    .font(Theme.mono(36, .heavy)).foregroundStyle(Theme.text)
-                    Text("Messages without internet or cell signal.")
-                        .font(.title3.weight(.semibold)).foregroundStyle(Theme.text)
-                }
-                Card {
-                    Kicker("How it works", color: Theme.amber)
-                    step("01", "Make a group, or join a friend's by scanning their invite QR.")
-                    step("02", "Phones nearby connect on their own, over Bluetooth and Wi-Fi.")
-                    step("03", "Every phone passes messages on, so they hop to people out of range.")
-                }
-                InputField(label: "Your name", hint: "Shown next to your messages.", active: focus == .name, tap: { focus = .name }) {
-                    TextField("", text: $name).focused($focus, equals: .name).submitLabel(.done)
-                }
-                if let invite {
-                    Card {
-                        Kicker("You're invited to", color: Theme.amber)
-                        Text(invite.name).font(Theme.mono(24, .heavy)).foregroundStyle(Theme.text)
-                        Button("Join \(invite.name)") { done(cleanName, invite.name, invite.code, false) }
-                            .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
-                        if cleanName.isEmpty { Text("Enter your name first.").font(.footnote).foregroundStyle(Theme.dim) }
-                    }
-                } else {
-                    Kicker("Your group")
-                    HStack(spacing: 8) {
-                        ChannelPill(title: "Create a group", selected: !joining, color: Theme.amber) { joining = false }
-                        ChannelPill(title: "Join a group", selected: joining, color: Theme.amber) { joining = true }
-                    }
-                    if joining {
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "qrcode.viewfinder").font(.title2).foregroundStyle(Theme.amber)
-                            Text("Got an invite QR? Open the iPhone Camera, point it at the QR code, and tap the DarkProof link.")
-                                .font(.subheadline).foregroundStyle(Theme.text)
-                        }
-                        InputField(label: "Or type the group code", hint: "Your friend finds it under People > Invite friends.",
-                                   active: focus == .code, tap: { focus = .code }) {
-                            TextField("", text: $code).focused($focus, equals: .code)
-                                .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                        }
-                        Button("Join") { done(cleanName, "Group", cleanCode, false) }
-                            .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty || cleanCode.count < 8)
-                        if !(name.isEmpty && code.isEmpty), let why = cleanName.isEmpty ? "Enter your name." :
-                            cleanCode.count < 8 ? "Codes have at least 8 characters." : nil {
-                            Text(why).font(.footnote).foregroundStyle(Theme.dim)
-                        }
-                    } else {
-                        InputField(label: "Group name", hint: "For example Family, or Building 12. You can change it later.",
-                                   active: focus == .group, tap: { focus = .group }) {
-                            TextField("", text: $groupName).focused($focus, equals: .group).submitLabel(.done)
-                        }
-                        Button("Create group") {
-                            let g = clean(groupName, Invite.maxGroupName)
-                            done(cleanName, g.isEmpty ? String("\(cleanName)'s group".prefix(Invite.maxGroupName)) : g, Invite.newCode(), true)
-                        }
+        Group {
+            if let invite {
+                form(title: "You're invited", subtitle: "Join \(invite.name) to message each other without internet.", back: false) {
+                    nameField
+                    Button("Join \(invite.name)") { done(cleanName, invite.name, invite.code, false) }
                         .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
-                        Text(cleanName.isEmpty ? "Enter your name first." :
-                                "DarkProof makes a secret code for the group. Then you get a QR code to invite friends.")
-                            .font(.footnote).foregroundStyle(Theme.dim)
-                    }
+                }
+            } else {
+                switch mode {
+                case .welcome: welcome
+                case .create: create
+                case .join: join
                 }
             }
-            .padding(20)
         }
-        .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg.ignoresSafeArea())
     }
 
-    private func step(_ n: String, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(n).font(Theme.mono(13, .bold)).foregroundStyle(Theme.amber)
-            Text(text).font(.subheadline).foregroundStyle(Theme.text)
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            Logo(size: 150).frame(maxWidth: .infinity)
+            Spacer()
+            Text("Stay connected when everything goes dark.")
+                .font(.system(size: 40, weight: .heavy)).tracking(-1).foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Messages travel phone to phone over Bluetooth and Wi-Fi. No internet, no signal, no account.")
+                .font(.system(size: 17)).foregroundStyle(Theme.dim).padding(.top, 14)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 12) {
+                Button { mode = .create } label: { Label("Create a group", systemImage: "plus") }.buttonStyle(PrimaryButton())
+                Button { mode = .join } label: { Label("Join a group", systemImage: "qrcode.viewfinder") }.buttonStyle(SecondaryButton())
+            }
+            .padding(.top, 36)
+            Text("Free and private. No servers, ever.").font(.footnote).foregroundStyle(Theme.faint)
+                .frame(maxWidth: .infinity).padding(.top, 14)
         }
+        .padding(.horizontal, 24).padding(.bottom, 12)
+    }
+
+    private var create: some View {
+        form(title: "Create a group", subtitle: "For your family, friends or building. DarkProof makes a secret code for it, then you invite people with a QR code.") {
+            nameField
+            InputField(label: "Group name", hint: "You can change it later.", active: focus == .group, tap: { focus = .group }) {
+                TextField("", text: $groupName, prompt: Text("Family").foregroundColor(Theme.faint))
+                    .focused($focus, equals: .group).submitLabel(.done)
+            }
+            Button("Create group") {
+                let g = clean(groupName, Invite.maxGroupName)
+                done(cleanName, g.isEmpty ? String("\(cleanName)'s group".prefix(Invite.maxGroupName)) : g, Invite.newCode(), true)
+            }
+            .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
+        }
+    }
+
+    private var join: some View {
+        form(title: "Join a group", subtitle: "Open the iPhone Camera, point it at your friend's invite QR and tap the DarkProof link. Or type their code here.") {
+            nameField
+            InputField(label: "Group code", hint: "Your friend finds it under Invite > Show code.", active: focus == .code, tap: { focus = .code }) {
+                TextField("", text: $code, prompt: Text("XXXX-XXXX-XXXX-XXXX").foregroundColor(Theme.faint))
+                    .focused($focus, equals: .code).textInputAutocapitalization(.characters).autocorrectionDisabled()
+            }
+            Button("Join") { done(cleanName, "Group", cleanCode, false) }
+                .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty || cleanCode.count < 8)
+            if !(name.isEmpty && code.isEmpty), let why = cleanName.isEmpty ? "Enter your name." :
+                cleanCode.count < 8 ? "Codes have at least 8 characters." : nil {
+                Text(why).font(.footnote).foregroundStyle(Theme.dim)
+            }
+        }
+    }
+
+    private var nameField: some View {
+        InputField(label: "Your name", hint: "Shown next to your messages.", active: focus == .name, tap: { focus = .name }) {
+            TextField("", text: $name, prompt: Text("Anna").foregroundColor(Theme.faint))
+                .focused($focus, equals: .name).submitLabel(.done).textContentType(.givenName)
+        }
+    }
+
+    private func form<C: View>(title: String, subtitle: String, back: Bool = true, @ViewBuilder _ content: () -> C) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if back {
+                    Button { focus = nil; mode = .welcome } label: { RoundIcon(symbol: "chevron.left") }.accessibilityLabel("Back")
+                } else {
+                    Logo(size: 44)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title).font(.system(size: 34, weight: .heavy)).tracking(-0.5).foregroundStyle(Theme.text)
+                    Text(subtitle).font(.system(size: 17)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                }
+                content()
+            }
+            .padding(24)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 }
 
-/// Labeled text field in the console style; [active] highlights it while it has focus.
+/// Labeled text field; [active] outlines it while it has focus.
 struct InputField<Field: View>: View {
     let label: String
     var hint = ""
@@ -156,14 +172,14 @@ struct InputField<Field: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Kicker(label, color: active ? Theme.amber : Theme.dim)
+            Kicker(label)
             field()
-                .font(.body).foregroundStyle(Theme.text)
-                .padding(.horizontal, 14).padding(.vertical, 13)
-                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(active ? Theme.amber : Theme.line, lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .font(.system(size: 17)).foregroundStyle(Theme.text).tint(Theme.text)
+                .padding(.horizontal, 18).frame(minHeight: 54)
+                .background(Theme.tile, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(active ? Theme.text.opacity(0.6) : .clear, lineWidth: 1.5))
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .onTapGesture(perform: tap)
             if !hint.isEmpty { Text(hint).font(.footnote).foregroundStyle(Theme.dim) }
         }
@@ -173,78 +189,168 @@ struct InputField<Field: View>: View {
 // MARK: - Main
 
 struct MainView: View {
+    enum Sheet: String, Identifiable { case invite, group, radio; var id: String { rawValue } }
     @ObservedObject var engine: Engine
     @Binding var showInvite: Bool
+    @AppStorage("groupName") private var groupName = "My group"
+    @AppStorage("code") private var code = ""
     @State private var tab = 0
+    @State private var sheet: Sheet?
 
     var body: some View {
-        VStack(spacing: 0) {
-            MeshHeader(engine: engine)
-            TabView(selection: $tab) {
-                page(ChatView(engine: engine)).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(0)
-                page(PeopleView(engine: engine, showInvite: $showInvite)).tabItem { Label("People", systemImage: "person.2.fill") }.tag(1)
-                page(AiView(engine: engine)).tabItem { Label("AI", systemImage: "sparkles") }.tag(2)
-                page(RadioView(engine: engine)).tabItem { Label("Radio", systemImage: "antenna.radiowaves.left.and.right") }.tag(3)
-                #if DEBUG
-                page(LanTestView(engine: engine)).tabItem { Label("LAN test", systemImage: "network") }.tag(4)
-                #endif
-            }
-            .tint(Theme.amber)
+        TabView(selection: $tab) {
+            HomeView(engine: engine, open: { sheet = $0 }, showPeople: { tab = 2 })
+                .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
+            ChatView(engine: engine).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(1)
+            PeopleView(engine: engine, open: { sheet = $0 }).tabItem { Label("People", systemImage: "person.2.fill") }.tag(2)
+            AiView(engine: engine).tabItem { Label("Ask", systemImage: "sparkles") }.tag(3)
+            #if DEBUG
+            LanTestView(engine: engine).tabItem { Label("LAN test", systemImage: "network") }.tag(4)
+            #endif
         }
-        .background(Theme.bg.ignoresSafeArea())
-        .onAppear { if showInvite { tab = 1 } }           // right after creating a group: invite people
-        .onChange(of: showInvite) { open in if open { tab = 1 } }
-    }
-
-    private func page<V: View>(_ v: V) -> some View {
-        v.frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.bg)
+        .tint(Theme.text)
+        .sheet(item: $sheet) { s in
+            switch s {
+            case .invite: InviteSheet(groupName: groupName, code: code)
+            case .group:
+                GroupSheet(engine: engine) { // a new group was created: invite people to it
+                    sheet = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sheet = .invite }
+                }
+            case .radio: RadioView(engine: engine)
+            }
+        }
+        .onAppear { if showInvite { showInvite = false; sheet = .invite } } // right after creating a group
+        .onChange(of: showInvite) { open in if open { showInvite = false; sheet = .invite } }
     }
 }
 
-/// Top bar: how many phones are linked right now, per transport. Tap for the detailed status lines.
-struct MeshHeader: View {
+// MARK: - Home
+
+struct HomeView: View {
     @ObservedObject var engine: Engine
-    @State private var open = false
+    let open: (MainView.Sheet) -> Void
+    let showPeople: () -> Void
+    @AppStorage("groupName") private var groupName = "My group"
+    @State private var details = false
+    @State private var confirmHelp = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { open.toggle() } } label: {
-                HStack(spacing: 12) {
-                    Radar(phones: engine.phones, radio: engine.radioLinked, sweeping: engine.phones == 0)
-                        .frame(width: 46, height: 46)
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 0) {
-                            if engine.phones == 0 { Text("SEARCHING"); Cursor() }
-                            else { Text("\(engine.phones) PHONE\(engine.phones == 1 ? "" : "S") IN RANGE") }
+        TimelineView(.periodic(from: .now, by: 30)) { t in
+            let people = Person.all(in: engine.messages, me: engine.deviceId)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    header
+                    hero
+                    if engine.phones == 0 { ConnectionHelp(engine: engine) }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            QuickAction(symbol: "checkmark.shield.fill", label: "I'm safe", tint: Theme.safe) { engine.checkIn(.safe) }
+                            QuickAction(symbol: "sos", label: "Need help", tint: Theme.help) { confirmHelp = true }
+                            QuickAction(symbol: "qrcode", label: "Invite", tint: Theme.text) { open(.invite) }
+                            QuickAction(symbol: "antenna.radiowaves.left.and.right", label: "Radio", tint: Theme.text) { open(.radio) }
                         }
-                        .font(Theme.mono(15, .bold)).foregroundStyle(Theme.text)
-                        HStack(spacing: 6) {
-                            Chip("BT \(engine.bluetoothLinks)", engine.bluetoothLinks > 0 ? Theme.live : Theme.dim)
-                            Chip("Wi-Fi \(engine.wifiLinks)", engine.wifiLinks > 0 ? Theme.live : Theme.dim)
-                            Chip(engine.radioLinked ? "LoRa on" : "LoRa off", engine.radioLinked ? Theme.amber : Theme.dim)
-                        }
+                        LastCheckIn(engine: engine, now: t.date).padding(.horizontal, 4)
                     }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down").font(.footnote.weight(.bold)).foregroundStyle(Theme.dim)
-                        .rotationEffect(.degrees(open ? 180 : 0))
+                    SectionTitle(title: "Your people", action: people.count > 3 ? "See all" : nil, tap: showPeople)
+                    if people.isEmpty {
+                        NoPeopleCard(groupName: groupName) { open(.invite) }
+                    } else {
+                        PeopleList(people: Array(people.prefix(3)), engine: engine, now: t.date)
+                    }
                 }
-                .contentShape(Rectangle())
+                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows connection details")
-            if open {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(engine.statusLines, id: \.self) { Text($0) }
-                    Text("Messages hop from phone to phone. Keep DarkProof running near other phones.").padding(.top, 4)
-                }
-                .font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                .transition(.opacity)
-            }
+            .background(Theme.bg.ignoresSafeArea())
         }
-        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
-        .background(Theme.bg)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .helpConfirmation($confirmHelp, groupName: groupName) { engine.checkIn(.help) }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Logo(size: 30)
+            Button { open(.group) } label: {
+                HStack(spacing: 5) {
+                    Text(groupName).font(.system(size: 22, weight: .bold)).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.dim)
+                }
+                .foregroundStyle(Theme.text)
+            }
+            .accessibilityHint("Switch or rename the group")
+            Spacer()
+            Button { open(.group) } label: { RoundIcon(symbol: "gearshape.fill") }.accessibilityLabel("Settings")
+        }
+    }
+
+    private var linkSummary: String {
+        if engine.phones == 0 { return "Keep DarkProof open. Your messages wait and go out as soon as a phone is in range." }
+        var via: [String] = []
+        if engine.bluetoothLinks > 0 { via.append("Bluetooth") }
+        if engine.wifiLinks > 0 { via.append("Wi-Fi") }
+        if engine.radioLinked { via.append("LoRa radio") }
+        let how = via.isEmpty ? "" : "Over \(ListFormatter.localizedString(byJoining: via)). "
+        return how + "Your messages hop from phone to phone."
+    }
+
+    private var hero: some View {
+        let connected = engine.phones > 0
+        return Button { withAnimation(.easeOut(duration: 0.2)) { details.toggle() } } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Circle().fill(connected ? Theme.safe : Theme.dim).frame(width: 9, height: 9)
+                    Text(connected ? "Connected" : "Looking for phones").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(connected ? Theme.safe : Theme.dim)
+                    Spacer()
+                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.faint)
+                        .rotationEffect(.degrees(details ? 180 : 0))
+                }
+                HStack(alignment: .lastTextBaseline, spacing: 12) {
+                    Text("\(engine.phones)").font(.system(size: 84, weight: .heavy)).tracking(-3).foregroundStyle(Theme.text)
+                    Text(engine.phones == 1 ? "phone\nin range" : "phones\nin range")
+                        .font(.system(size: 21, weight: .bold)).foregroundStyle(Theme.dim).padding(.bottom, 12)
+                }
+                Text(linkSummary).font(.system(size: 15)).foregroundStyle(Theme.dim).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if details {
+                    VStack(alignment: .leading, spacing: 4) { ForEach(engine.statusLines, id: \.self) { Text($0) } }
+                        .font(.system(size: 13)).foregroundStyle(Theme.faint).padding(.top, 10)
+                }
+            }
+            .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            .background(VaultShape().fill(Theme.card))
+            .contentShape(VaultShape())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Shows connection details")
+    }
+}
+
+/// One of the four square shortcuts on Home.
+struct QuickAction: View {
+    let symbol: String
+    let label: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(tint)
+                    .frame(width: 44, height: 44).background(Circle().fill(tint.opacity(0.14)))
+                Text(label).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(PressScale())
+    }
+}
+
+/// Shrinks a custom-drawn button a little while pressed.
+struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.scaleEffect(configuration.isPressed ? 0.96 : 1).opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -258,53 +364,65 @@ struct ChatView: View {
     @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
+    private var shown: [Message] { engine.messages.filter { $0.isPublic == toPublic } }
+
     var body: some View {
+        let list = shown
         VStack(spacing: 0) {
-            if engine.messages.isEmpty {
-                EmptyState(title: "No messages yet",
-                           text: "Messages from your group and the Public channel show up here. Invite friends from the People tab, then keep DarkProof open near each other.") {
-                    Radar(phones: engine.phones, radio: engine.radioLinked).frame(width: 150, height: 150)
-                }
+            VStack(alignment: .leading, spacing: 14) {
+                ScreenTitle(title: toPublic ? "Everyone" : groupName,
+                            subtitle: engine.phones == 0 ? "No one in range right now" :
+                                "\(engine.phones) \(engine.phones == 1 ? "phone" : "phones") in range")
+                ChannelSwitch(toPublic: $toPublic, groupName: groupName)
+                Text(toPublic ? "Anyone with DarkProof nearby can read these." : "Only people in \(groupName) can read these.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.faint)
+            }
+            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
+
+            if list.isEmpty {
+                EmptyState(symbol: toPublic ? "megaphone.fill" : "bubble.left.and.bubble.right.fill",
+                           title: "No messages yet",
+                           text: toPublic ? "Messages for everyone nearby show up here, from any group."
+                                          : "Write the first one. It reaches everyone in \(groupName) who is in range, or later when they are.")
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(Array(engine.messages.enumerated()), id: \.element.id) { i, m in
+                        LazyVStack(spacing: 6) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { i, m in
                                 let mine = m.sender == engine.deviceId
-                                let prev = i > 0 ? engine.messages[i - 1] : nil
-                                let newRun = prev == nil || prev!.sender != m.sender || prev!.name != m.name || prev!.isPublic != m.isPublic
-                                Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil,
-                                       time: Self.time.string(from: Date(timeIntervalSince1970: Double(m.ts) / 1000)),
-                                       isPublic: m.isPublic && newRun)
-                                    .padding(.top, newRun && i > 0 ? 10 : 0)
-                                    .id(m.id)
+                                let prev = i > 0 ? list[i - 1] : nil
+                                let newRun = prev == nil || prev!.sender != m.sender || prev!.name != m.name
+                                    || CheckIn.of(prev!.text) != nil
+                                let time = Self.time.string(from: Date(timeIntervalSince1970: Double(m.ts) / 1000))
+                                Group {
+                                    if let c = CheckIn.of(m.text) {
+                                        CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time)
+                                    } else {
+                                        Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil, time: time)
+                                    }
+                                }
+                                .padding(.top, newRun && i > 0 ? 10 : 0)
+                                .id(m.id)
                             }
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 12)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: engine.messages.count) { _ in
-                        if let last = engine.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                        if let last = shown.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    }
+                    .onChange(of: toPublic) { _ in
+                        DispatchQueue.main.async { if let last = shown.last { proxy.scrollTo(last.id, anchor: .bottom) } }
                     }
                     .onAppear { // open on the newest messages, once the list has been laid out
-                        DispatchQueue.main.async { if let last = engine.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                        DispatchQueue.main.async { if let last = shown.last { proxy.scrollTo(last.id, anchor: .bottom) } }
                     }
                 }
             }
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    ChannelPill(title: String(groupName.prefix(14)), selected: !toPublic, color: Theme.amber) { toPublic = false }
-                    ChannelPill(title: "Public", selected: toPublic, color: Theme.open) { toPublic = true }
-                    Spacer()
-                    Text(toPublic ? "Everyone with DarkProof can read it" : "Only your group can read it").lineLimit(1).minimumScaleFactor(0.8)
-                        .font(.caption).foregroundStyle(toPublic ? Theme.open : Theme.dim)
-                }
-                Composer(draft: $draft, placeholder: toPublic ? "Message to everyone" : "Message to your group",
-                         accent: toPublic ? Theme.open : Theme.amber, enabled: true, send: send)
-            }
-            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+            Composer(draft: $draft, placeholder: toPublic ? "Message everyone" : "Message \(groupName)", send: send)
+                .padding(.horizontal, 16).padding(.vertical, 10)
         }
+        .background(Theme.bg.ignoresSafeArea())
         .alert("Too long for LoRa: it will travel only over Bluetooth and Wi-Fi", isPresented: $tooLong) { Button("OK", role: .cancel) {} }
     }
 
@@ -317,65 +435,79 @@ struct ChatView: View {
     }
 }
 
-/// One message. Your own are amber on the right; others are grey on the left with their name above.
+/// Your group or everyone nearby.
+struct ChannelSwitch: View {
+    @Binding var toPublic: Bool
+    let groupName: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            segment(groupName, selected: !toPublic) { toPublic = false }
+            segment("Everyone", selected: toPublic) { toPublic = true }
+        }
+        .padding(4).background(Capsule().fill(Theme.tile))
+        .animation(.easeOut(duration: 0.15), value: toPublic)
+    }
+
+    private func segment(_ title: String, selected: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(selected ? Color.black : Theme.dim)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(Capsule().fill(selected ? Color.white : .clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One message. Yours are white on the right; others are dark grey on the left with their name above.
 struct Bubble: View {
     let text: String
     let mine: Bool
     var name: String? = nil
     var time: String? = nil
-    var isPublic = false
     var isError = false
     var busy = false
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if mine { Spacer(minLength: 56) }
-            VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
-                if name != nil || isPublic {
-                    HStack(spacing: 6) {
-                        if isPublic { Chip("Public", Theme.open) }
-                        if let name { Text(name).font(Theme.mono(11, .semibold)).foregroundStyle(Theme.dim) }
-                    }
-                    .padding(.horizontal, 4)
-                }
-                VStack(alignment: .trailing, spacing: 3) {
-                    HStack(alignment: .lastTextBaseline, spacing: 0) {
-                        Text(text).textSelection(.enabled)
-                        if busy { Cursor(color: Theme.text) }
-                    }
-                    .font(.body)
-                    .foregroundStyle(mine ? Color.black : (isError ? Theme.alert : Theme.text))
-                    if let time {
-                        Text(time).font(Theme.mono(10)).foregroundStyle(mine ? Color.black.opacity(0.55) : Theme.dim)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(mine ? Theme.amber : Theme.raised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
+            if let name { Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.dim).padding(.horizontal, 6) }
+            Group {
+                if busy && text.isEmpty { Text("Thinking…").foregroundStyle(Theme.dim) }
+                else { Text(text).textSelection(.enabled) }
             }
-            if !mine { Spacer(minLength: 56) }
+            .font(.system(size: 17))
+            .foregroundStyle(mine ? Color.black : (isError ? Theme.help : Theme.text))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.vertical, 11)
+            .background(mine ? Color.white : Theme.tile, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            if let time { Text(time).font(.system(size: 12)).foregroundStyle(Theme.faint).padding(.horizontal, 6) }
         }
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+        .padding(mine ? .leading : .trailing, 48)
     }
 }
 
-/// Group / Public switch above the message field.
-struct ChannelPill: View {
-    let title: String
-    let selected: Bool
-    let color: Color
-    let action: () -> Void
+/// A check-in in the chat: a green "is safe" or red "needs help" card.
+struct CheckInRow: View {
+    let checkIn: CheckIn
+    let name: String? // nil = you
+    let time: String
 
     var body: some View {
-        Button(action: action) {
-            Text(title.uppercased()).font(Theme.mono(11, .bold)).tracking(1)
-                .foregroundStyle(selected ? Color.black : Theme.dim)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(selected ? color : Color.clear, in: Capsule())
-                .overlay(Capsule().stroke(selected ? color : Theme.line, lineWidth: 1))
+        let safe = checkIn == .safe
+        HStack(spacing: 12) {
+            Image(systemName: safe ? "checkmark.shield.fill" : "sos").font(.system(size: 18, weight: .bold)).foregroundStyle(checkIn.color)
+            Text(name.map { safe ? "\($0) is safe" : "\($0) needs help" } ?? (safe ? "You're safe" : "You asked for help"))
+                .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+            Spacer()
+            Text(time).font(.system(size: 13)).foregroundStyle(Theme.dim)
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .animation(.easeOut(duration: 0.15), value: selected)
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .background(checkIn.color.opacity(0.13), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -383,23 +515,22 @@ struct ChannelPill: View {
 struct Composer: View {
     @Binding var draft: String
     let placeholder: String
-    var accent = Theme.amber
     var enabled = true
     let send: () -> Void
     private var canSend: Bool { enabled && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(placeholder, text: $draft, axis: .vertical)
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("", text: $draft, prompt: Text(placeholder).foregroundColor(Theme.faint), axis: .vertical)
                 .lineLimit(1...5)
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 16).padding(.vertical, 11)
-                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.line, lineWidth: 1))
+                .font(.system(size: 17)).foregroundStyle(Theme.text).tint(Theme.text)
+                .padding(.horizontal, 18).padding(.vertical, 14)
+                .background(Theme.tile, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
             Button(action: send) {
-                Image(systemName: "arrow.up").font(.system(size: 18, weight: .heavy)).foregroundStyle(.black)
-                    .frame(width: 44, height: 44)
-                    .background(accent.opacity(canSend ? 1 : 0.3), in: Circle())
+                Image(systemName: "arrow.up").font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(canSend ? Color.black : Theme.faint)
+                    .frame(width: 50, height: 50)
+                    .background(Circle().fill(canSend ? Color.white : Theme.tile))
             }
             .disabled(!canSend)
             .accessibilityLabel("Send")
@@ -407,17 +538,18 @@ struct Composer: View {
     }
 }
 
-struct EmptyState<Art: View>: View {
+struct EmptyState: View {
+    let symbol: String
     let title: String
     let text: String
-    @ViewBuilder let art: () -> Art
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             Spacer()
-            art()
-            HStack(spacing: 0) { Kicker(title, color: Theme.text); Cursor().font(Theme.mono(11, .semibold)) }
-            Text(text).font(.subheadline).foregroundStyle(Theme.dim).multilineTextAlignment(.center).frame(maxWidth: 320)
+            Image(systemName: symbol).font(.system(size: 28, weight: .semibold)).foregroundStyle(Theme.text)
+                .frame(width: 72, height: 72).background(Circle().fill(Theme.tile))
+            Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text)
+            Text(text).font(.system(size: 16)).foregroundStyle(Theme.dim).multilineTextAlignment(.center).frame(maxWidth: 320)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -425,7 +557,7 @@ struct EmptyState<Art: View>: View {
     }
 }
 
-// MARK: - AI
+// MARK: - Ask (offline AI)
 
 struct AiView: View {
     @ObservedObject var engine: Engine
@@ -435,54 +567,54 @@ struct AiView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    ScreenTitle(title: "Ask", subtitle: "Offline assistant on this iPhone")
+                    Spacer()
+                    Button("New") { ai.newConversation() }.buttonStyle(GhostButton())
+                        .disabled(ai.busy || ai.conversation.isEmpty)
+                }
                 Button { choosingModel = true } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "cpu")
                         Text(ai.selected.title).lineLimit(1)
-                        Image(systemName: "chevron.down").font(.caption2)
+                        Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
                     }
                 }
                 .buttonStyle(GhostButton())
-                Spacer()
-                Button("New") { ai.newConversation() }
-                    .buttonStyle(GhostButton()).disabled(ai.busy || ai.conversation.isEmpty)
+                Text("It works with no internet and can be wrong. Double-check anything important.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.faint)
             }
-            .padding(.horizontal, 12).padding(.top, 10)
-            Text("Runs on this iPhone with no internet. It can be wrong: double-check anything important.")
-                .font(.caption).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16).padding(.top, 8)
+            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
 
             if !ai.selectedReady {
                 VStack {
                     Card {
-                        Kicker("No AI model on this iPhone", color: Theme.alert)
+                        Text("No AI model on this iPhone").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
                         Text("Download one while you still have internet. It stays on the phone and works offline afterwards.")
-                            .font(.subheadline).foregroundStyle(Theme.text)
+                            .font(.system(size: 16)).foregroundStyle(Theme.dim)
                         Button("Choose a model") { choosingModel = true }.buttonStyle(PrimaryButton())
                     }
                     Spacer()
                 }
-                .padding(12)
+                .padding(20)
             } else if ai.conversation.isEmpty {
-                EmptyState(title: "Ask anything",
-                           text: "First aid, water, staying warm, what to pack. Or summarize what your group said.") {
-                    Image(systemName: "sparkles").font(.system(size: 44, weight: .light)).foregroundStyle(Theme.amber)
-                }
+                EmptyState(symbol: "sparkles", title: "Ask anything",
+                           text: "First aid, water, staying warm, what to pack. Or summarize what your group said.")
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 4) {
+                        LazyVStack(spacing: 6) {
                             ForEach(Array(ai.conversation.enumerated()), id: \.element.id) { i, t in
                                 let mine = t.role == "user"
                                 let newRun = i == 0 || ai.conversation[i - 1].role != t.role
-                                Bubble(text: t.text, mine: mine, name: newRun && !mine ? "AI" : nil, isError: t.isError,
+                                Bubble(text: t.text, mine: mine, name: newRun && !mine ? "Assistant" : nil, isError: t.isError,
                                        busy: ai.busy && !mine && i == ai.conversation.count - 1)
                                     .padding(.top, newRun && i > 0 ? 10 : 0)
                                     .id(t.id)
                             }
                         }
-                        .padding(12)
+                        .padding(16)
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: ai.conversation.last?.text) { _ in
@@ -494,19 +626,19 @@ struct AiView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button { summarize() } label: { Label("Summarize group messages", systemImage: "text.alignleft") }
                     .buttonStyle(GhostButton())
                     .disabled(ai.busy || !ai.selectedReady || engine.messages.isEmpty)
-                Composer(draft: $draft, placeholder: ai.busy ? "Thinking…" : "Ask the AI",
+                Composer(draft: $draft, placeholder: ai.busy ? "Thinking…" : "Ask a question",
                          enabled: !ai.busy && ai.selectedReady) {
                     let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !t.isEmpty { draft = ""; ai.send(t) }
                 }
             }
-            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+            .padding(.horizontal, 16).padding(.vertical, 10)
         }
+        .background(Theme.bg.ignoresSafeArea())
         .sheet(isPresented: $choosingModel) { ModelPicker(ai: ai) }
     }
 
@@ -522,75 +654,66 @@ struct AiView: View {
     }
 }
 
-struct ModelPicker: View {
-    @ObservedObject var ai: LocalAi
+/// Sheet with a title and a Done button, used for the secondary screens.
+struct SheetPage<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    Text("Models run entirely on this iPhone. Bigger ones answer better but slower.")
-                        .font(.footnote).foregroundStyle(Theme.dim).frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(LocalAi.catalog) { m in row(m) }
-                }
-                .padding(16)
-            }
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("AI model")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.bg, for: .navigationBar)
-            .toolbar { Button("Done") { dismiss() }.font(Theme.mono(15, .bold)) }
+            ScrollView { VStack(alignment: .leading, spacing: 16) { content() }.padding(20) }
+                .background(Theme.bg.ignoresSafeArea())
+                .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Theme.bg, for: .navigationBar)
+                .toolbar { Button("Done") { dismiss() }.fontWeight(.semibold) }
         }
         .preferredColorScheme(.dark)
+        .tint(Theme.text)
+    }
+}
+
+struct ModelPicker: View {
+    @ObservedObject var ai: LocalAi
+
+    var body: some View {
+        SheetPage(title: "AI model") {
+            Text("Models run entirely on this iPhone. Bigger ones answer better but slower.")
+                .font(.system(size: 15)).foregroundStyle(Theme.dim)
+            ForEach(LocalAi.catalog) { m in row(m) }
+        }
     }
 
     private func row(_ m: AiModel) -> some View {
         let size = ByteCountFormatter.string(fromByteCount: m.bytes, countStyle: .file)
         return Card {
             HStack(alignment: .firstTextBaseline) {
-                Text(m.title).font(Theme.mono(16, .bold)).foregroundStyle(Theme.text)
+                Text(m.title).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
                 Spacer()
-                if ai.selectedId == m.id && ai.states[m.id] == .ready { Chip("In use", Theme.live) }
+                if ai.selectedId == m.id && ai.states[m.id] == .ready { Chip("In use", Theme.safe) }
             }
-            Text(m.detail).font(.subheadline).foregroundStyle(Theme.text)
-            Text("\(size) · \(m.license)").font(Theme.mono(11)).foregroundStyle(Theme.dim)
+            Text(m.detail).font(.system(size: 15)).foregroundStyle(Theme.text)
+            Text("\(size) · \(m.license)").font(.system(size: 13)).foregroundStyle(Theme.dim)
             switch ai.states[m.id] ?? .missing {
             case .ready:
                 HStack {
                     if ai.selectedId != m.id { Button("Use this model") { ai.select(m) }.buttonStyle(GhostButton()) }
                     Spacer()
                     Button("Delete", role: .destructive) { ai.delete(m) }
-                        .font(Theme.mono(12, .bold)).foregroundStyle(Theme.alert).disabled(ai.busy)
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.help).disabled(ai.busy)
                 }
             case .missing:
                 Button("Download \(size)") { ai.download(m) }.buttonStyle(PrimaryButton()).disabled(ai.isDownloading)
             case .downloading(let p):
-                Segments(progress: p)
-                Text("Downloading \(Int(p * 100))%. Keep the app open.").font(Theme.mono(11)).foregroundStyle(Theme.amber)
+                ProgressLine(progress: p)
+                Text("Downloading \(Int(p * 100))%. Keep the app open.").font(.system(size: 13)).foregroundStyle(Theme.dim)
             case .verifying:
-                HStack(spacing: 0) { Kicker("Checking the download", color: Theme.amber); Cursor() }
+                Text("Checking the download…").font(.system(size: 13)).foregroundStyle(Theme.dim)
             case .failed(let why):
-                Text("Download failed: \(why)").font(.footnote).foregroundStyle(Theme.alert)
+                Text("Download failed: \(why)").font(.footnote).foregroundStyle(Theme.help)
                 Button("Try again") { ai.download(m) }.buttonStyle(GhostButton()).disabled(ai.isDownloading)
             }
         }
-    }
-}
-
-/// Segmented console progress bar.
-struct Segments: View {
-    let progress: Double
-    var count = 24
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<count, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Double(i) < progress * Double(count) ? Theme.amber : Theme.amber.opacity(0.15))
-                    .frame(height: 10)
-            }
-        }
-        .accessibilityElement().accessibilityLabel("\(Int(progress * 100)) percent")
     }
 }
 
@@ -608,57 +731,56 @@ struct RadioView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Card {
-                    HStack {
-                        Kicker("LoRa radio", color: Theme.amber)
-                        Spacer()
-                        Chip(engine.radioLinked ? "Linked" : "Not linked", engine.radioLinked ? Theme.live : Theme.dim)
-                    }
-                    Text(statusText).font(Theme.mono(14, .semibold)).foregroundStyle(Theme.text)
-                    Button(searching ? "Search again" : "Search for radios") {
-                        radios = []; searching = true
-                        engine.lora.scan { id, name in
-                            if !radios.contains(where: { $0.id == id }) { radios.append(Radio(id: id, name: name)) }
-                        }
-                    }
-                    .buttonStyle(PrimaryButton())
-                    if searching && radios.isEmpty {
-                        HStack(spacing: 0) { Kicker("Looking for radios nearby", color: Theme.amber); Cursor() }
-                        Text("Turn the radio on and keep it next to the phone.").font(.footnote).foregroundStyle(Theme.dim)
-                    }
-                    ForEach(radios) { r in
-                        Button {
-                            engine.lora.select(r.id)
-                            note = "Connecting. If asked, enter the PIN shown on the radio."
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "antenna.radiowaves.left.and.right").foregroundStyle(Theme.amber)
-                                Text(r.name).font(Theme.mono(14, .semibold)).foregroundStyle(Theme.text)
-                                Spacer()
-                                Text("CONNECT").font(Theme.mono(11, .bold)).foregroundStyle(Theme.amber)
-                            }
-                            .padding(12)
-                            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(Theme.dim) }
+        SheetPage(title: "LoRa radio") {
+            Card {
+                HStack {
+                    Text("Radio").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                    Spacer()
+                    Chip(engine.radioLinked ? "Linked" : "Not linked", engine.radioLinked ? Theme.safe : Theme.dim)
                 }
-                Card {
-                    Kicker("What it does")
-                    Text("A Meshtastic LoRa radio pairs with this iPhone over Bluetooth and reaches other radios kilometers away: about 2–10 km in a city, more in open country or from high places. Every radio also relays for the others.")
-                        .font(.subheadline).foregroundStyle(Theme.text)
-                    Kicker("Limits")
-                    Text("Short messages only (about 160 characters), one every 20 seconds, and only from the last 30 minutes.")
-                        .font(.subheadline).foregroundStyle(Theme.text)
-                    Kicker("You need")
-                    Text("A Meshtastic radio set to the EU_868 region, for example a Heltec V3.")
-                        .font(.subheadline).foregroundStyle(Theme.text)
+                Text(statusText).font(.system(size: 15)).foregroundStyle(Theme.dim)
+                Button(searching ? "Search again" : "Search for radios") {
+                    radios = []; searching = true
+                    engine.lora.scan { id, name in
+                        if !radios.contains(where: { $0.id == id }) { radios.append(Radio(id: id, name: name)) }
+                    }
                 }
+                .buttonStyle(PrimaryButton())
+                if searching && radios.isEmpty {
+                    Text("Looking for radios nearby… Turn the radio on and keep it next to the phone.")
+                        .font(.footnote).foregroundStyle(Theme.dim)
+                }
+                ForEach(radios) { r in
+                    Button {
+                        engine.lora.select(r.id)
+                        note = "Connecting. If asked, enter the PIN shown on the radio."
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                            Text(r.name).font(.system(size: 16, weight: .semibold))
+                            Spacer()
+                            Text("Connect").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.dim)
+                        }
+                        .foregroundStyle(Theme.text)
+                        .padding(16)
+                        .background(Theme.tile, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(Theme.dim) }
             }
-            .padding(12)
+            Card {
+                info("What it does", "A Meshtastic LoRa radio pairs with this iPhone over Bluetooth and reaches other radios kilometers away: about 2–10 km in a city, more in open country or from high places. Every radio also relays for the others.")
+                info("Limits", "Short messages only (about 160 characters), one every 20 seconds, and only from the last 30 minutes.")
+                info("You need", "A Meshtastic radio set to the EU_868 region, for example a Heltec V3.")
+            }
+        }
+    }
+
+    private func info(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
+            Text(text).font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -671,26 +793,29 @@ struct LanTestView: View {
 
     var body: some View {
         ScrollView {
-            Card {
-                Kicker("Debug build only", color: Theme.alert)
-                Text("Connects over TCP to the Android app's LAN test listener, to test chat, relaying, and encryption between the two apps. This does NOT test Bluetooth or Apple peer-to-peer.")
-                    .font(.subheadline).foregroundStyle(Theme.text)
-                Text("From the iOS Simulator, 127.0.0.1:7777 reaches an Android emulator after running on the computer:\nadb -s <emulator> forward tcp:7777 tcp:7777")
-                    .font(Theme.mono(11)).foregroundStyle(Theme.dim)
-                InputField(label: "Host:port") {
-                    TextField("", text: $address).textInputAutocapitalization(.never).autocorrectionDisabled()
-                }
-                Button("Connect") {
-                    let a = address.trimmingCharacters(in: .whitespaces)
-                    if let i = a.lastIndex(of: ":"), let port = UInt16(a[a.index(after: i)...]), i > a.startIndex {
-                        engine.lan.connect(host: String(a[..<i]), port: port)
+            VStack(alignment: .leading, spacing: 16) {
+                ScreenTitle(title: "LAN test", subtitle: "Debug build only")
+                Card {
+                    Text("Connects over TCP to the Android app's LAN test listener, to test chat, relaying, and encryption between the two apps. This does NOT test Bluetooth or Apple peer-to-peer.")
+                        .font(.system(size: 15)).foregroundStyle(Theme.text)
+                    Text("From the iOS Simulator, 127.0.0.1:7777 reaches an Android emulator after running on the computer:\nadb -s <emulator> forward tcp:7777 tcp:7777")
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.dim)
+                    InputField(label: "Host:port") {
+                        TextField("", text: $address).textInputAutocapitalization(.never).autocorrectionDisabled()
                     }
+                    Button("Connect") {
+                        let a = address.trimmingCharacters(in: .whitespaces)
+                        if let i = a.lastIndex(of: ":"), let port = UInt16(a[a.index(after: i)...]), i > a.startIndex {
+                            engine.lan.connect(host: String(a[..<i]), port: port)
+                        }
+                    }
+                    .buttonStyle(PrimaryButton())
+                    Button("Stop LAN test") { engine.lan.stop() }.buttonStyle(GhostButton())
                 }
-                .buttonStyle(PrimaryButton())
-                Button("Stop LAN test") { engine.lan.stop() }.buttonStyle(GhostButton())
             }
-            .padding(12)
+            .padding(.horizontal, 20).padding(.top, 8)
         }
+        .background(Theme.bg.ignoresSafeArea())
     }
 }
 #endif
