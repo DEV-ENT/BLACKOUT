@@ -219,8 +219,14 @@ object MeshEngine {
         notifyUi()
     }
 
-    /** This group's message, else a Public channel message (photos are group-only: dropped), else null (relayed, not shown). */
-    private fun read(p: Packet): Message? = crypto?.open(p) ?: publicCrypto?.open(p)?.copy(public = true, photo = null)
+    /**
+     * This group's message, else a Public channel message (photos are group-only: dropped; others' words filtered),
+     * else null (relayed, not shown).
+     */
+    private fun read(p: Packet): Message? = crypto?.open(p) ?: publicCrypto?.open(p)?.copy(public = true, photo = null)?.let(::filtered)
+
+    /** Someone else's Everyone message or place with offensive words masked (WordFilter); mine as written. */
+    private fun filtered(m: Message) = if (m.sender == deviceId) m else m.copy(name = WordFilter.clean(m.name), text = WordFilter.clean(m.text))
 
     /** Confirms a group message in the next receipt, with that group's key; messages within 2 seconds share one. Main thread. */
     private fun ack(id: String, key: GroupCrypto) {
@@ -255,7 +261,8 @@ object MeshEngine {
             id = Packet.newId(cr.mailbox)
             p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, senderId, from, text, if (public) null else photo))
             save(p)
-            messages += Message(id, ts, senderId, from, text, public, if (public) null else photo); messageIds += id
+            val m = Message(id, ts, senderId, from, text, public, if (public) null else photo)
+            messages += if (public) filtered(m) else m; messageIds += id // Wi-Fi board posts are someone else's
         }
         synchronized(ids) { mine += id }
         r.publish(p); notifyUi()

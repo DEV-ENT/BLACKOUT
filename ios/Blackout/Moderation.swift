@@ -25,3 +25,10 @@ enum Moderation {
 
     static func visible(_ m: Message) -> Bool { blocked[m.sender] == nil && !hidden.contains(m.id) }
 }
+
+/// How to reach the developer (Settings, "Help and safety"); app stores ask apps with public posts to show this.
+enum Contact {
+    static let email = "support@darkproof.app"
+    static let mail = URL(string: "mailto:support@darkproof.app?subject=DarkProof%20report")!
+    static let privacy = URL(string: "https://darkproof.app/privacy")!
+}

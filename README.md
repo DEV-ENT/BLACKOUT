@@ -2,7 +2,7 @@
 
 <img src="brand/darkproof-logo.png" alt="DarkProof logo" width="160">
 
-DarkProof is a messaging app for when there is no internet and no mobile network. Phones talk to each other directly and pass messages along, so a message can reach someone who is out of range of the sender. An on-device AI helps with practical questions, and an optional LoRa radio extends the range to kilometres.
+DarkProof is a messaging app for when there is no internet and no mobile network. Phones talk to each other directly and pass messages along, so a message can reach someone who is out of range of the sender. While there is internet, messages also travel through free public relays, so the same chats work across any distance; no server of ours is involved. An on-device AI helps with practical questions, and an optional LoRa radio extends the range to kilometres.
 
 There are two apps that work together: one for **Android** and one for **iPhone**. They use the same message format and encryption.
 
@@ -12,7 +12,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **Mesh forwarding.** Every phone stores messages and passes them on to the phones it meets:
   - Duplicates are dropped.
   - Each message can be relayed up to 16 times.
-  - Each phone passes on up to 500 messages, for 7 days. Your group's messages stay readable on the phone until the app is deleted; the phone keeps the newest 2,000 Public messages, and forgets other groups' messages it can't read after 7 days.
+  - Each phone passes on up to 500 messages, for 7 days. Your group's messages stay readable on the phone until the app is deleted; the phone keeps the newest 2,000 Everyone messages, and forgets other groups' messages it can't read after 7 days.
 - **Ways phones connect:**
 
   | Connection | Android | iPhone |
@@ -23,6 +23,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
   | Wi-Fi networks: a router with no internet, a hotspot, a community network or a rooftop link | ✓ | ✓ |
   | LoRa through a Meshtastic radio (EU 868 MHz), over Bluetooth | ✓ | ✓ |
   | LoRa through a MeshCore radio (firmware 1.15 or newer), over Bluetooth | ✓ | ✓ |
+  | Internet: public Nostr relays, optionally through Tor built into the app | ✓ | ✓ |
 
   The **Connections** screen shows all of them: what is linked now, an on/off switch for Wi-Fi networks, an address to
   type when phones don't find each other, and pairing for both kinds of radio. **Send via another app** shares an
@@ -43,10 +44,16 @@ There are two apps that work together: one for **Android** and one for **iPhone*
   - **Small photos** (up to 14 KB) for your group, and **delivery status** ("Delivered to Anna").
   - **Offline street maps:** save about 10 km around you while you have internet (OpenFreeMap, up to 50 MB).
   - Alerts for new group messages, made on the phone.
-- **Public channel.** Anyone with DarkProof can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
+- **Internet relays.** With Wi-Fi or mobile data, every message also goes up to six free public Nostr relays, encrypted as always, and comes down on the phones it is for. No account and no server of ours: each phone signs with a new random key at every start.
+  - Packets carry a 2-byte "mailbox" tag, so a phone asks only for its group's and the Everyone channel's packets.
+  - A phone with internet also passes on its neighbours' packets. In a blackout, one phone that still has internet (a satellite link, a working mast) connects its whole neighbourhood to the world.
+  - Each phone posts its own new messages first. Anyone else's go up only if no relay has them yet, slowly, and relays that ask phones to slow down are paused.
+  - **Connect through Tor** (off by default) runs Tor inside the app (tor-android on Android, Tor.framework on iPhone), so relays don't see the phone's internet address. Nothing goes to the relays until a check through Tor passes.
+  - Details: `spec/FORMAT.md`, "Internet relays".
+- **Everyone channel.** Anyone with DarkProof can read and post on it, whatever their group, nearby or online. Every phone relays every message, including messages from other groups that it cannot read. Offensive words in other people's posts are masked; hold a message to report it or block its sender. Contact for abuse: support@darkproof.app.
 - **Android extras:**
   - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.
-  - **Wi-Fi board:** the phone opens its own Wi-Fi network and a web page, so people without the app can read and post Public messages from a browser.
+  - **Wi-Fi board:** the phone opens its own Wi-Fi network and a web page, so people without the app can read and post Everyone messages from a browser.
 - **Testing on a computer.** An Android emulator and an iPhone Simulator link over the Wi-Fi network transport: run `adb forward tcp:7778 tcp:7777`, then type `127.0.0.1:7778` in the iPhone's Connections screen. Debug builds also have test hooks (sample messages, an AI self-test).
 
 ## Repository layout
@@ -65,7 +72,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 
 ### Android
 
-1. You need Android Studio, or the Android SDK with platform 35 and JDK 17 or newer.
+1. You need Android Studio, or the Android SDK with platform 35 and JDK 17 or newer. The build uses Android Gradle Plugin 8.13.2: tor-android's code is built for Java 24, which older plugins can't read.
 2. Create `local.properties` containing `sdk.dir=<path to your Android SDK>`.
 3. Build:
    ```bash
@@ -83,7 +90,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
    ```bash
    ios/Vendor/fetch-llama.sh
    ```
-3. Open `ios/Blackout.xcodeproj`.
+3. Open `ios/Blackout.xcodeproj`. Xcode fetches the Swift packages, including Tor.framework (a 141 MB download, pinned to 409.15.3).
 4. Under Signing & Capabilities, pick your Team. A free Apple ID works, but the app then has to be reinstalled every 7 days.
 5. Select your iPhone and press Run.
 
@@ -134,6 +141,8 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - On an Android emulator: the offline map saved, then shown with airplane mode on; alerts while the app is in the background; picking and sending a photo.
 - The Android AI on an emulator: downloading and checking Gemma 4 E2B, answering the same test questions as the iPhone (including a follow-up and a question about the group), and falling back to the CPU when the GPU can't run.
 - Two iPhone Simulators connecting over Apple peer-to-peer.
+- Online mode, live on public relays (emulator and Simulator with no other link): group messages, photos, check-ins, receipts and Everyone messages in both directions; Sent and Delivered labels; no re-posting after restarts.
+- Tor built into both apps, live: each linked to the relays through its own Tor, messages crossed both ways, and no connection went around Tor (checked with `lsof` and `/proc/net/tcp`). With Tor on but not running, nothing reached the relays.
 - A real iPhone 15 exchanging messages with a Mac over real Bluetooth LE.
 - The AI running on a real iPhone 15.
 - On a real iPhone 15, over real Bluetooth LE: messages arrive while the phone is locked, and the link comes back after the other side restarts.
@@ -146,13 +155,15 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - Wi-Fi network discovery between real phones (Bonjour/mDNS); the emulator and the Simulator can't see each other's announcements.
 - MeshCore radios: built from MeshCore's source code and tested byte by byte, but never connected to a real radio.
 - iPhone and Android over real Bluetooth.
+- Online mode and Tor on real phones over mobile data, and how relays rate-limit many phones behind one carrier address.
 - iPhone to iPhone on real devices.
 - LoRa with real Meshtastic radios.
 - Battery use and range.
 
 ## Privacy and TestFlight
 
-- Privacy policy: [PRIVACY.md](PRIVACY.md). DarkProof has no servers and collects no data.
+- Privacy policy: [PRIVACY.md](PRIVACY.md), to be published at https://darkproof.app/privacy (the apps link there from Settings). DarkProof has no servers of its own and collects no data.
+- Contact, including abuse reports: support@darkproof.app.
 - How to put the iPhone app on TestFlight: [docs/TESTFLIGHT.md](docs/TESTFLIGHT.md).
 
 ## Known limits
@@ -163,6 +174,6 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 
 ## License
 
-Third-party code: llama.cpp is MIT-licensed (see `ios/Vendor/LICENSE-llama.cpp.txt`). AI models have their own licenses, listed above.
+Third-party code: llama.cpp is MIT-licensed (see `ios/Vendor/LICENSE-llama.cpp.txt`). Tor is BSD-licensed; it comes from tor-android (Guardian Project, BSD) on Android and Tor.framework (iCepa, MIT) on iPhone. AI models have their own licenses, listed above.
 
 This project doesn't have a license of its own yet.

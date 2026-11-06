@@ -437,6 +437,15 @@ struct GroupSheet: View {
                 }
             }
             Card {
+                Text("Help and safety").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                Text("In Everyone, hold a message to report it or block its sender. To report abuse or a problem, write to \(Contact.email).")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Email us") { UIApplication.shared.open(Contact.mail) }.buttonStyle(GhostButton())
+                    Button("Privacy policy") { UIApplication.shared.open(Contact.privacy) }.buttonStyle(GhostButton())
+                }
+            }
+            Card {
                 Text("Join or start another group").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
                 InputField(label: "Group code", hint: "Easier: point the iPhone Camera at a friend's invite QR.") {
                     TextField("", text: $joinCode).textInputAutocapitalization(.characters).autocorrectionDisabled()

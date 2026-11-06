@@ -202,6 +202,20 @@ only, never relays.
   `wss://relay.ditto.pub`, `wss://relay.nostr.net`, `wss://nostr.data.haus`. nos.lol and nostr.mom don't answer Tor
   exits (tested 2026-11-06); the four relays in both lists carry messages between phones with and without Tor.
 
+### Everyone filter
+
+In other people's Public messages and places, each app masks offensive words with bullets (`•`, one per letter)
+before showing them. Whole messages are never hidden, so an emergency message with a swear word still gets through.
+Your own messages are shown as written. Both apps use the same list (`WordFilter.LIST` / `WordFilter.list`; the tests
+pin its SHA-256) and the same rules:
+
+- A word is a run of letters, digits, `@` and `$`; only words with a letter are checked.
+- It is compared after removing accents, lowercasing, reading `0 1 3 4 5 7 @ $` as `o i e a s t a s` and dropping
+  anything that is not `a`–`z`. Stretched words (a letter 3+ times in a row) are also tried with those runs cut to two
+  letters and to one.
+- It matches a list entry exactly, or starts with an entry that ends in `*`. Only whole words match, so "Scunthorpe"
+  and "puttanesca" stay as written.
+
 ## Wi-Fi networks
 
 Phones on the same Wi-Fi network connect over TCP: a router with no internet, a phone hotspot, a community network or a

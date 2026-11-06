@@ -13,7 +13,7 @@ struct BlackoutApp: App {
             UserDefaults.standard.set(String(args[i + 1][..<bar]), forKey: "name")
             UserDefaults.standard.set(String(args[i + 1][args[i + 1].index(after: bar)...]), forKey: "code")
         }
-        if let i = args.firstIndex(of: "set"), args.indices.contains(i + 2) { // set wifiNetwork 0
+        for i in args.indices where args[i] == "set" && args.indices.contains(i + 2) { // set wifiNetwork 0 (repeatable)
             UserDefaults.standard.set(args[i + 2] == "1", forKey: args[i + 1])
         }
         #endif

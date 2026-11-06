@@ -231,11 +231,14 @@ final class Engine: ObservableObject {
         if newly { DispatchQueue.main.async { self.handedOff.insert(id) } }
     }
 
-    /// This group's message, else a Public channel message, else nil (relayed but not shown).
+    /// This group's message, else a Public channel message, else nil (relayed but not shown). In someone else's Everyone
+    /// messages and places, offensive words are masked (WordFilter); mine stay as written.
     private func read(_ p: Packet) -> Message? {
         if let m = crypto.open(p) { return m }
         guard let m = publicCrypto.open(p) else { return nil }
-        return Message(id: m.id, ts: m.ts, sender: m.sender, name: m.name, text: m.text, isPublic: true) // photos are group-only (spec)
+        let mine = m.sender == deviceId
+        return Message(id: m.id, ts: m.ts, sender: m.sender, name: mine ? m.name : WordFilter.clean(m.name),
+                       text: mine ? m.text : WordFilter.clean(m.text), isPublic: true) // photos are group-only (spec)
     }
 
     /// A packet seen for the first time: keep it, and show it if it belongs to this group or the Public channel.

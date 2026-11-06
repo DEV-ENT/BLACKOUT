@@ -394,6 +394,14 @@ private fun SettingsSheet(s: AppState, a: MainActivity, add: () -> Unit, close: 
                 }
             }
         }
+        Card {
+            Txt("Help and safety", 16, FontWeight.SemiBold)
+            Txt("In Everyone, hold a message to report it or block its sender. To report abuse or a problem, write to ${Contact.EMAIL}.", 14, color = Theme.dim)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Email us") { Contact.open(a, Contact.MAIL) }
+                GhostButton("Privacy policy") { Contact.open(a, Contact.PRIVACY) }
+            }
+        }
     }
 }
 
