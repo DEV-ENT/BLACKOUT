@@ -145,7 +145,7 @@ fun MainView(s: AppState, a: MainActivity) {
                 else -> HomeTab(s, a, g, messages, phones) { sheet = it }
             }
         }
-        if (!(s.tab == 1 && WindowInsets.isImeVisible)) TabBar(s.tab, Modifier.align(Alignment.BottomCenter)) { s.tab = it } // hidden while typing
+        if (!((s.tab == 1 || s.tab == 4) && WindowInsets.isImeVisible)) TabBar(s.tab, Modifier.align(Alignment.BottomCenter)) { s.tab = it } // hidden while typing
     }
     val close = { sheet = null }
     when (val sh = sheet) {

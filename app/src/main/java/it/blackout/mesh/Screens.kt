@@ -31,7 +31,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -402,54 +408,171 @@ fun ViewPhotoSheet(jpeg: ByteArray, close: () -> Unit) {
 
 // MARK: - Ask
 
-/** What the assistant knows about the group, like the iPhone's Situation.swift. */
-fun situation(g: SavedGroup, messages: List<Message>): String {
+/** What the app knows right now, as plain text for the assistant, the same as the iPhone's Situation.swift. */
+fun situation(g: SavedGroup, messages: List<Message>, me: Spot? = null): String {
+    val lines = ArrayList<String>()
     val people = Person.all(messages, MeshEngine.deviceId)
-    val lines = people.map { p ->
-        val state = when (p.checkIn) { CheckIn.SAFE -> "safe (${ago(p.checkInTs)})"; CheckIn.HELP -> "NEEDS HELP (${ago(p.checkInTs)})"; null -> "no check-in, last message ${ago(p.lastTs)}" }
-        "- ${p.name}: $state" + (p.battery?.let { ", battery $it%" } ?: "")
+    val phones = phonesInRange()
+    lines += "Group \"${g.name}\": ${people.size} other ${if (people.size == 1) "person" else "people"} have written; $phones phone(s) in range right now."
+    for (p in people.take(15)) {
+        val parts = ArrayList<String>()
+        parts += when (p.checkIn) {
+            CheckIn.SAFE -> "safe (checked in ${ago(p.checkInTs)})"; CheckIn.HELP -> "NEEDS HELP (checked in ${ago(p.checkInTs)})"; null -> "has not checked in"
+        }
+        parts += "last heard ${ago(p.lastTs)}"
+        p.battery?.let { parts += "battery $it%" }
+        p.spot?.let { sp ->
+            parts += if (me != null) "was ${Geo.meters(Geo.distance(me, sp))} ${Geo.compassWord(Geo.bearing(me, sp)).lowercase()} of you ${ago(p.spotTs)}"
+            else "shared a position ${ago(p.spotTs)}"
+        }
+        lines += "- ${p.name}: " + parts.joinToString(", ")
     }
-    val places = messages.filter { it.public }.mapNotNull { Place.of(it.text) }.takeLast(10).map { "- ${it.kind.word}" + if (it.note.isNotEmpty()) ": ${it.note}" else "" }
-    val recent = messages.filter { !it.public && CheckIn.of(it.text) == null }.takeLast(15).map { "${it.name}: ${if (it.photo != null) "[photo] " else ""}${Photo.caption(it.text).ifEmpty { it.text }}" }
-    return buildString {
-        append("Group: ${g.name}. People who wrote in the group:\n")
-        append(if (lines.isEmpty()) "- nobody yet\n" else lines.joinToString("\n", postfix = "\n"))
-        if (places.isNotEmpty()) append("Places shared nearby:\n").append(places.joinToString("\n", postfix = "\n"))
-        if (recent.isNotEmpty()) append("Recent group messages:\n").append(recent.joinToString("\n", postfix = "\n"))
+    val mine = messages.lastOrNull { !it.public && it.sender == MeshEngine.deviceId && CheckIn.of(it.text) != null }
+    lines += if (mine != null) "You (the person asking) last checked in as ${if (CheckIn.of(mine.text) == CheckIn.HELP) "needing help" else "safe"}, ${ago(mine.ts)}."
+        else "You (the person asking) have not checked in yet."
+    val places = messages.filter { it.public }.mapNotNull { m -> Place.of(m.text)?.let { Triple(it, if (m.sender == MeshEngine.deviceId) "you" else m.name, m.ts) } }
+        .let { l -> if (me == null) l.reversed() else l.sortedBy { it.first.spot?.let { sp -> Geo.distance(me, sp) } ?: Double.MAX_VALUE } }.take(10)
+    lines += if (places.isEmpty()) "Shared places: none yet." else "Shared places (nearest first):"
+    for ((pl, by, ts) in places) {
+        val d = if (pl.spot != null && me != null) ", ${Geo.meters(Geo.distance(me, pl.spot))} ${Geo.compassWord(Geo.bearing(me, pl.spot)).lowercase()}" else ""
+        lines += "- ${pl.kind.word}${if (pl.note.isEmpty()) "" else ": " + pl.note.take(120)} (by $by, ${ago(ts)}$d)"
+    }
+    val recent = messages.filter { !it.public && CheckIn.of(it.text) == null }.takeLast(8)
+    if (recent.isNotEmpty()) {
+        lines += "Latest group messages, oldest first:"
+        for (m in recent) {
+            val who = if (m.sender == MeshEngine.deviceId) "You" else m.name
+            val text = if (m.photo != null) "[photo] " + Photo.caption(m.text) else m.text
+            lines += "- $who, ${ago(m.ts)}: ${text.take(160)}"
+        }
+    }
+    return lines.joinToString("\n")
+}
+
+/** The assistant's instructions and the group's situation, like the iPhone. */
+fun aiSystem(g: SavedGroup, messages: List<Message>, me: Spot? = null) =
+    LocalAi.instructions + "\n\n" + LocalAi.situationIntro + "\n" + situation(g, messages, me)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AskTab(g: SavedGroup, messages: List<Message>) {
+    var draft by remember { mutableStateOf("") }
+    var choose by remember { mutableStateOf(false) }
+    val m = LocalAi.model(LocalAi.selected)
+    val ready = m != null && LocalAi.states[m.id] == LocalAi.State.Ready
+    val turns = LocalAi.conversation
+    val me = rememberMySpot()
+    val list = rememberLazyListState()
+    LaunchedEffect(turns.size, turns.lastOrNull()?.text?.length) { if (turns.isNotEmpty()) list.scrollToItem(turns.size - 1) }
+    fun send(q: String) { if (q.isNotBlank() && !LocalAi.busy) { LocalAi.ask(q.trim(), aiSystem(g, messages, me)); draft = "" } }
+    val typing = WindowInsets.isImeVisible
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().padding(bottom = if (typing) 0.dp else 84.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { ScreenTitle("Ask", "Offline assistant on this phone") }
+                if (ready && turns.isNotEmpty() && !LocalAi.busy) GhostButton("New") { LocalAi.newConversation() }
+            }
+            if (ready) Row(Modifier.fillMaxWidth().clip(CircleShape).background(Theme.tile).clickable { choose = true }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Ic(R.drawable.ic_auto_awesome, Theme.text, 18.dp); Spacer(Modifier.width(8.dp))
+                Txt("${m!!.title} · " + (LocalAi.typicalSeconds(m)?.let { "about $it s per answer here" } ?: "speed shown after the first answer"),
+                    14, FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+                Txt("Change", 14, FontWeight.SemiBold, Theme.dim)
+            }
+        }
+        if (!ready) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Card {
+                    Txt("No AI model on this phone", 18, FontWeight.Bold)
+                    Txt("Download one while you still have internet. It stays on the phone and works offline afterwards.", 15, color = Theme.dim)
+                }
+                ModelList()
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (turns.isEmpty()) item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Txt("Ask anything: first aid, water, power, repairs, or what is happening in your group.", 15, color = Theme.dim)
+                        listOf("Who in my group needs help, and who has not checked in?", "How do I make water safe to drink?",
+                            "How do I stop heavy bleeding?", "How do I keep warm without power?").forEach { q ->
+                            Txt(q, 15, FontWeight.SemiBold, modifier = Modifier.clip(RoundedCornerShape(18.dp)).background(Theme.card)
+                                .clickable { send(q) }.padding(horizontal = 16.dp, vertical = 12.dp))
+                        }
+                    }
+                }
+                items(turns.size) { i ->
+                    val t = turns[i]; val me = t.role == "user"
+                    Box(Modifier.fillMaxWidth(), contentAlignment = if (me) Alignment.CenterEnd else Alignment.CenterStart) {
+                        Text(if (t.text == "…") AnnotatedString("Thinking…") else if (me) AnnotatedString(t.text) else markdown(t.text),
+                            Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(22.dp)).background(if (me) Color.White else Theme.tile)
+                                .padding(horizontal = 16.dp, vertical = 11.dp),
+                            color = when { me -> Color.Black; t.isError -> Theme.help; t.text == "…" -> Theme.dim; else -> Theme.text },
+                            fontSize = 16.sp, lineHeight = 23.sp)
+                    }
+                }
+                item { Txt("It works with no internet and can be wrong. Double-check anything important.", 13, color = Theme.faint, modifier = Modifier.padding(top = 4.dp)) }
+            }
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextBox(draft, { draft = it.take(1000) }, "Ask anything", singleLine = false, keyboard = KeyboardOptions(KeyboardCapitalization.Sentences),
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(26.dp))
+                if (LocalAi.busy) RoundIcon(R.drawable.ic_close, 52.dp, desc = "Stop") { LocalAi.stop() }
+                else RoundIcon(R.drawable.ic_arrow_upward, 52.dp, tint = if (draft.isBlank()) Theme.dim else Color.Black,
+                    bg = if (draft.isBlank()) Theme.tile else Color.White, desc = "Ask") { send(draft) }
+            }
+        }
+    }
+    if (choose) SheetPage("AI model", { choose = false }) { ModelList() }
+}
+
+/** The little Markdown models write: **bold**, and "* " or "- " bullets. */
+fun markdown(text: String): AnnotatedString = buildAnnotatedString {
+    text.lines().forEachIndexed { i, raw ->
+        if (i > 0) append("\n")
+        val line = raw.replace(Regex("^(\\s*)[*-] "), "$1• ").replace(Regex("^#{1,4} "), "")
+        var bold = false
+        line.split("**").forEachIndexed { k, part ->
+            if (k > 0) bold = !bold
+            if (bold) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) } else append(part)
+        }
     }
 }
 
+/** The models this phone can run, with download, use and delete. */
 @Composable
-fun AskTab(g: SavedGroup, messages: List<Message>) {
-    val ctx = LocalContext.current
-    var ready by remember { mutableStateOf(LocalAi.ready(ctx)) }
-    var downloading by remember { mutableStateOf(false) }
-    var question by remember { mutableStateOf("") }
-    var answer by remember { mutableStateOf<String?>(null) }
-    var thinking by remember { mutableStateOf(false) }
-    LaunchedEffect(downloading) { while (downloading && !ready) { kotlinx.coroutines.delay(3000); ready = LocalAi.ready(ctx) } }
-    fun ask(q: String) {
-        thinking = true; answer = null
-        val prompt = "You are an offline emergency assistant on a phone with no internet. Answer in English, briefly and clearly. " +
-            "If you are not sure, say so. In medical emergencies, tell people to get trained help as soon as they can.\n\n" +
-            "Current situation of the user's group (use it only when the question is about the group):\n${situation(g, messages)}\nQuestion: $q"
-        LocalAi.ask(ctx, prompt) { r -> android.os.Handler(android.os.Looper.getMainLooper()).post { answer = r; thinking = false } }
-    }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ScreenTitle("Ask", "Offline assistant on this phone")
-        if (!ready) Card {
-            Txt("No AI model on this phone", 18, FontWeight.Bold)
-            Txt("Download one while you still have internet. It stays on the phone and works offline afterwards.", 15, color = Theme.dim)
-            if (downloading) Txt("Downloading in the background. Keep the internet connection on.", 15, FontWeight.SemiBold, Theme.safe)
-            else PrimaryButton("Download (1.6 GB)", icon = R.drawable.ic_download) { LocalAi.download(ctx); downloading = true }
-        } else {
-            InputField("Ask anything", question, { question = it.take(1000) }, "How do I make river water safe to drink?", singleLine = false,
-                keyboard = KeyboardOptions(KeyboardCapitalization.Sentences))
-            PrimaryButton(if (thinking) "Thinking…" else "Ask", enabled = !thinking && question.isNotBlank()) { ask(question.trim()) }
-            SecondaryButton("Who needs help?", enabled = !thinking) { ask("Summarize the group's situation: who is safe, who needs help, and what is missing. Do not make anything up.") }
-            answer?.let { a -> Card { Txt(a, 16, lineHeight = 23) } }
-            Txt("It works with no internet and can be wrong. Double-check anything important.", 14, color = Theme.faint)
+private fun ModelList() {
+    Txt("Models run entirely on this phone. Bigger ones answer better but slower. This phone has ${LocalAi.memoryGB} GB of memory: only models that fit are shown.",
+        14, color = Theme.dim)
+    if (LocalAi.catalog.isEmpty()) Txt("No model fits a phone with less than 4 GB of memory.", 15, FontWeight.SemiBold, Theme.help)
+    LocalAi.catalog.forEach { m ->
+        val st = LocalAi.states[m.id] ?: LocalAi.State.Missing
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Txt(m.title, 18, FontWeight.Bold, modifier = Modifier.weight(1f))
+                if (LocalAi.selected == m.id && st == LocalAi.State.Ready) Chip("In use", Theme.safe)
+            }
+            Txt(m.detail, 15, color = Theme.dim)
+            Txt("${"%.1f".format(m.bytes / 1e9)} GB · ${m.license}" + (LocalAi.typicalSeconds(m)?.let { " · about $it s per answer here" } ?: ""), 13, color = Theme.faint)
+            when (st) {
+                LocalAi.State.Missing -> PrimaryButton("Download ${"%.1f".format(m.bytes / 1e9)} GB", icon = R.drawable.ic_download) { LocalAi.download(m) }
+                is LocalAi.State.Downloading -> {
+                    Txt("Downloading ${(st.progress * 100).toInt()}%. Keep the internet on.", 15, FontWeight.SemiBold)
+                    Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(Theme.tile)) {
+                        Box(Modifier.fillMaxWidth(st.progress.coerceIn(0.02f, 1f)).fillMaxHeight().background(Theme.text, CircleShape))
+                    }
+                    GhostButton("Cancel") { LocalAi.cancel(m) }
+                }
+                LocalAi.State.Verifying -> Txt("Checking the download…", 15, FontWeight.SemiBold, Theme.dim)
+                LocalAi.State.Ready -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (LocalAi.selected != m.id) GhostButton("Use this model") { LocalAi.select(m) }
+                    GhostButton("Delete", enabled = !LocalAi.busy) { LocalAi.delete(m) }
+                }
+                is LocalAi.State.Failed -> {
+                    Txt(st.why, 15, color = Theme.help)
+                    GhostButton("Try again") { LocalAi.download(m) }
+                }
+            }
         }
     }
 }

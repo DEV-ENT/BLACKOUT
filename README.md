@@ -24,7 +24,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 
 - **AI that runs on the phone.** It needs no internet once its model is downloaded.
   - **iPhone:** runs on llama.cpp. You pick the model in the app, and it keeps the conversation as context.
-  - **Android:** runs Qwen 2.5 1.5B on MediaPipe.
+  - **Android:** runs Gemma 4 on Google's LiteRT-LM, on the phone's GPU when it works, else its CPU. You pick the model in the app, and it keeps the conversation as context.
 - **Groups and people (iPhone and Android):**
   - "Create a group" makes a strong random code. Friends join by scanning the invite QR with their phone camera, or by an invite link sent over AirDrop, Quick Share or any app. The same `darkproof://join` links work on both apps.
   - The People tab shows who is in your group, who is in range now, and when you last heard from everyone else.
@@ -89,7 +89,9 @@ Simulator builds work too. They don't include the AI, and the Simulator has no B
 cd ios/BlackoutCore && swift test    # Swift core
 ```
 
-## AI models (iPhone)
+## AI models
+
+### iPhone
 
 The app downloads a model once, while internet is available, and checks its SHA-256. It offers only the models that fit the iPhone's memory, and shows how long answers take on that iPhone (measured once used, estimated before).
 
@@ -99,6 +101,17 @@ The app downloads a model once, while internet is available, and checks its SHA-
 | Qwen 3.5 4B | 2.7 GB | Apache 2.0 | iPhones with 6 GB or more | 11–60 s per answer |
 | Gemma 4 E4B | 4.6 GB | Apache 2.0 | iPhones with 8 GB or more | not tested yet |
 | Qwen 3.5 2B | 1.4 GB | Apache 2.0 | iPhones with 4 GB (11, 12, 13, SE) | less reliable |
+
+### Android
+
+The same approach on Google's LiteRT-LM: the app downloads a model once, checks its size and SHA-256 before using it, offers only the models that fit the phone's memory, runs on the phone's GPU when it works (otherwise on its CPU), keeps the conversation, and shows how long answers take on that phone.
+
+| Model | Size | License | Offered on | On an Android emulator (4 CPU cores, 4 GB) |
+|---|---|---|---|---|
+| Gemma 4 E2B (recommended) | 2.6 GB | Apache 2.0 | phones with 4 GB or more | 2–7 s per answer, on the CPU |
+| Gemma 4 E4B | 3.7 GB | Apache 2.0 | phones with 8 GB or more | not tested yet |
+
+Emulator times come from a Mac and are not phone times.
 
 Only the official instruct versions are offered. The assistant also gets the group's latest check-ins, battery levels and shared places with each question, so it can answer "who hasn't checked in?".
 
@@ -112,6 +125,7 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - An iPhone Simulator chatting with an Android emulator over the LAN test mode.
 - An iPhone Simulator and an Android emulator in one group, over the LAN test mode: check-ins with battery and position, places, photos and delivery status in both directions; an Android invite QR and link; messages written while offline arriving after reconnecting.
 - On an Android emulator: the offline map saved, then shown with airplane mode on; alerts while the app is in the background; picking and sending a photo.
+- The Android AI on an emulator: downloading and checking Gemma 4 E2B, answering the same test questions as the iPhone (including a follow-up and a question about the group), and falling back to the CPU when the GPU can't run.
 - Two iPhone Simulators connecting over Apple peer-to-peer.
 - A real iPhone 15 exchanging messages with a Mac over real Bluetooth LE.
 - The AI running on a real iPhone 15.
@@ -121,6 +135,7 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 
 **Not verified yet:**
 - Android on real phones, including sending the app to another phone and a real phone joining the Wi-Fi board.
+- The Android AI on a real phone, including its GPU.
 - iPhone and Android over real Bluetooth.
 - iPhone to iPhone on real devices.
 - LoRa with real Meshtastic radios.

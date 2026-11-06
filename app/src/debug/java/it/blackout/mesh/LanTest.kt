@@ -161,6 +161,36 @@ object LanTest {
     fun statusLine() = lan.statusLine()
     fun log(s: String) { Log.i("DarkProof", s) }
 
+    /** The iPhone's self-test questions (LocalAi.swift), timed: adb shell am start … --es aiSelfTest 1, then logcat -s DarkProof. */
+    private fun aiSelfTest(c: Context) {
+        val g = Groups.current(c) ?: return log("AI self-test: no group")
+        val m = LocalAi.model(LocalAi.selected) ?: return log("AI self-test: no model ready")
+        val qs = listOf(
+            "How do I make river water safe to drink without a filter?",
+            "Someone is trapped behind a jammed metal door. How can we open it?",
+            "And if the hinges are on the inside?",
+            "My friend has a deep cut on the thigh and blood is spurting. No ambulance can come. What do I do?",
+            "What is the most paracetamol an adult can take in 24 hours, and what are the signs of an overdose?",
+            "A child is locked in a hot car and nobody has the keys. How do I break the window safely?",
+            "Write a 10-step checklist for preparing a home for a week without power.",
+            "Who has not checked in?",
+        )
+        fun mem() = android.app.ActivityManager.MemoryInfo().also { c.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it) }.availMem / 1_000_000
+        log("AI self-test: ${m.title}, phone memory class ${LocalAi.memoryGB} GB, free memory ${mem()} MB")
+        LocalAi.newConversation()
+        fun next(k: Int) {
+            if (k == qs.size) { log("AI self-test: done, backend ${LocalAi.backendName}, free memory ${mem()} MB"); return }
+            val t0 = System.currentTimeMillis()
+            LocalAi.ask(qs[k], aiSystem(g, MeshEngine.snapshot())) { a ->
+                val s = (System.currentTimeMillis() - t0) / 1000.0
+                log("AI === ${qs[k]} (${"%.1f".format(s)} s, ${a.text.length} chars${if (a.isError) ", ERROR" else ""}, ${LocalAi.backendName})")
+                a.text.replace("\n", " ⏎ ").chunked(900).forEach { log("AI | $it") }
+                next(k + 1)
+            }
+        }
+        next(0)
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private fun whenStarted(f: () -> Unit) { if (MeshEngine.router != null) f() else main.postDelayed({ whenStarted(f) }, 500) }
 
@@ -175,6 +205,7 @@ object LanTest {
         }
         log("debug intent: lan=${i.getStringExtra("lan")} samples=${i.getStringExtra("samples")} started=${MeshEngine.router != null}")
         if (i.getStringExtra("lan") == "listen") whenStarted { log("lan: listening on $PORT"); lan.listen(PORT) }
+        if (i.getStringExtra("aiSelfTest") != null) whenStarted { aiSelfTest(c) }
         if (i.getStringExtra("samples") != null) whenStarted {
             val spot = Spot(45.46600, 9.19200, 8)
             MeshEngine.send(CheckIn.SAFE.text(81, spot))

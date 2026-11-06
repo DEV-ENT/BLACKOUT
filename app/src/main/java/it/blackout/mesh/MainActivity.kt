@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
         state = AppState(this)
         Notifier.setUp(this)
         OfflineMap.setUp(this)
+        LocalAi.setUp(this)
         link(intent)
         if (state.group != null) permissions()
         setContent { DarkProofApp(state, this) }
