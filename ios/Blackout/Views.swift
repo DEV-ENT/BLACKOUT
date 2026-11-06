@@ -199,14 +199,12 @@ struct MainView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            HomeView(engine: engine, open: { sheet = $0 }, showPeople: { tab = 2 })
+            HomeView(engine: engine, open: { sheet = $0 }, showPeople: { tab = 3 })
                 .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
             ChatView(engine: engine).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(1)
-            PeopleView(engine: engine, open: { sheet = $0 }).tabItem { Label("People", systemImage: "person.2.fill") }.tag(2)
-            AiView(engine: engine).tabItem { Label("Ask", systemImage: "sparkles") }.tag(3)
-            #if DEBUG
-            LanTestView(engine: engine).tabItem { Label("LAN test", systemImage: "network") }.tag(4)
-            #endif
+            PlacesView(engine: engine).tabItem { Label("Places", systemImage: "mappin.and.ellipse") }.tag(2)
+            PeopleView(engine: engine, open: { sheet = $0 }).tabItem { Label("People", systemImage: "person.2.fill") }.tag(3)
+            AiView(engine: engine).tabItem { Label("Ask", systemImage: "sparkles") }.tag(4)
         }
         .tint(Theme.text)
         .sheet(item: $sheet) { s in
@@ -362,6 +360,8 @@ struct ChatView: View {
     @State private var tooLong = false
     @State private var toPublic = false
     @State private var readers: ReaderList?
+    @State private var findingPlace: SharedPlace?
+    @ObservedObject private var loc = LocationService.shared
     @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
@@ -400,7 +400,15 @@ struct ChatView: View {
                                     if case .delivered(let r) = delivery { readers = ReaderList(id: m.id, readers: r) }
                                 }
                                 Group {
-                                    if let c = CheckIn.of(m.text) {
+                                    if m.isPublic, let place = Place.of(m.text) {
+                                        let shared = SharedPlace(id: m.id, place: place, by: mine ? "you" : m.name, ts: m.ts)
+                                        VStack(alignment: .trailing, spacing: 4) {
+                                            PlaceRow(shared: shared, me: loc.location?.spot, now: Date())
+                                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                                .onTapGesture { if place.spot != nil { findingPlace = shared } }
+                                            if let delivery { StatusLine(time: nil, delivery: delivery).padding(.horizontal, 6) }
+                                        }
+                                    } else if let c = CheckIn.of(m.text) {
                                         VStack(alignment: .trailing, spacing: 4) {
                                             CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time, battery: CheckIn.battery(in: m.text))
                                             if let delivery { StatusLine(time: nil, delivery: delivery).padding(.horizontal, 6).onTapGesture(perform: showReaders) }
@@ -433,6 +441,7 @@ struct ChatView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .sheet(item: $readers) { DeliveredSheet(readers: $0.readers) }
+        .sheet(item: $findingPlace) { FindSheet(place: $0.place, by: $0.by, ts: $0.ts) }
         .alert("Too long for LoRa: it will travel only over Bluetooth and Wi-Fi", isPresented: $tooLong) { Button("OK", role: .cancel) {} }
     }
 
@@ -747,6 +756,7 @@ struct SheetPage<Content: View>: View {
     var body: some View {
         NavigationStack {
             ScrollView { VStack(alignment: .leading, spacing: 16) { content() }.padding(20) }
+                .scrollDismissesKeyboard(.interactively)
                 .background(Theme.bg.ignoresSafeArea())
                 .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(Theme.bg, for: .navigationBar)

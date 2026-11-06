@@ -9,6 +9,24 @@ public struct Spot: Equatable, Sendable {
 
     public init(lat: Double, lon: Double, accuracy: Int? = nil) { self.lat = lat; self.lon = lon; self.accuracy = accuracy }
 
+    /// The last " 📍 LAT,LON ±Nm" in a text (spec/FORMAT.md, "Check-ins"), or nil if there is none or it is malformed.
+    public static func last(in text: String) -> Spot? {
+        guard let r = text.range(of: "📍 ", options: .backwards) else { return nil }
+        let words = text[r.upperBound...].split(separator: " ", omittingEmptySubsequences: false)
+        let ll = words.first?.split(separator: ",", omittingEmptySubsequences: false) ?? []
+        let number: (Substring) -> Double? = { s in
+            s.count <= 12 && s.allSatisfy { $0.isASCII && ($0.isNumber || $0 == "." || $0 == "-") } ? Double(s) : nil
+        }
+        guard ll.count == 2, let lat = number(ll[0]), let lon = number(ll[1]) else { return nil }
+        var accuracy: Int?
+        if words.count > 1, words[1].hasPrefix("±"), words[1].hasSuffix("m") {
+            let digits = words[1].dropFirst().dropLast()
+            if digits.count <= 5, digits.allSatisfy({ $0.isASCII && $0.isNumber }) { accuracy = Int(digits) }
+        }
+        let s = Spot(lat: lat, lon: lon, accuracy: accuracy)
+        return s.isValid ? s : nil
+    }
+
     public var isValid: Bool { lat.isFinite && lon.isFinite && (-90...90).contains(lat) && (-180...180).contains(lon) }
 
     /// "45.46420,9.19000 ±12m": 5 decimals is about 1 m, more than a phone's GPS can tell.

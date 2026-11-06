@@ -16,6 +16,7 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
 - **Messages, to nearby phones running DarkProof.** They travel over Bluetooth, Wi-Fi peer-to-peer and LoRa radios, with no internet. Every phone passes messages on to the phones it meets, for up to 7 days.
   - **Group messages** are encrypted end to end with a key made from your group code. Phones that relay them cannot read them. Anyone who knows the group code can read them.
   - **Public channel messages** can be read by anyone who has DarkProof.
+  - **Places you share** (water, shelter, charging, medical) are Public channel messages: anyone nearby can read them, including the position if you choose to add yours.
   - Each message carries the name you entered and a random ID for your phone.
   - **Check-ins** ("I'm safe", "I need help") carry your battery level.
   - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
@@ -27,12 +28,12 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
 
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
-- **Location (iPhone, optional)**: only while the app is open, to add your position to check-ins if you turned that on, and to point you toward a friend who shared theirs. Never in the background.
+- **Location (iPhone, optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.
   - **Notifications**: to keep the mesh running in the background.
 
-DarkProof never sends your location anywhere except to your group, and only if you turn that on. It never reads your location in the background.
+DarkProof sends your location only where you choose: to your group in check-ins if you turn that on, or to everyone nearby when you share a place with your position. It never reads your location in the background.
 
 ## Deleting your data
 

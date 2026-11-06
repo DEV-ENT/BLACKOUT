@@ -74,6 +74,21 @@ sharing.
 A person's status is their most recent check-in, and so is their battery level. Their position is the one in their
 most recent check-in that carried a position.
 
+## Places
+
+A place is an ordinary **Public channel** message that tells everyone nearby where to find help, so apps that don't
+know places (and the Wi-Fi board) still show it as text:
+
+```
+💧 Water: tap at the school gym, bring bottles · 📍 45.46420,9.19000 ±12m
+```
+
+- It starts with one of `💧 Water`, `🏠 Shelter`, `🔌 Charging` or `🏥 Medical`, followed by nothing, `:` and a note
+  (at most 200 characters), or ` · 📍 …`.
+- The position, if any, is written and read exactly like a check-in's (see "Check-ins"). It is where the place is:
+  apps add it only when the user says they are at the place.
+- Anyone can read places, from any group. Apps sort them by distance and show their age.
+
 ## Delivery receipts
 
 When a phone gets a new group message from someone else, it confirms it with a receipt, so the sender sees

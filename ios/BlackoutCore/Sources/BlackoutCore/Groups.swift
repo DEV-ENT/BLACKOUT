@@ -55,22 +55,7 @@ public enum CheckIn: String, Sendable {
     }
 
     /// The position a check-in carries, if any.
-    public static func spot(in text: String) -> Spot? {
-        guard of(text) != nil, let r = text.range(of: "📍 ", options: .backwards) else { return nil }
-        let words = text[r.upperBound...].split(separator: " ", omittingEmptySubsequences: false)
-        let ll = words.first?.split(separator: ",", omittingEmptySubsequences: false) ?? []
-        let number: (Substring) -> Double? = { s in
-            s.count <= 12 && s.allSatisfy { $0.isASCII && ($0.isNumber || $0 == "." || $0 == "-") } ? Double(s) : nil
-        }
-        guard ll.count == 2, let lat = number(ll[0]), let lon = number(ll[1]) else { return nil }
-        var accuracy: Int?
-        if words.count > 1, words[1].hasPrefix("±"), words[1].hasSuffix("m") {
-            let digits = words[1].dropFirst().dropLast()
-            if digits.count <= 5, digits.allSatisfy({ $0.isASCII && $0.isNumber }) { accuracy = Int(digits) }
-        }
-        let s = Spot(lat: lat, lon: lon, accuracy: accuracy)
-        return s.isValid ? s : nil
-    }
+    public static func spot(in text: String) -> Spot? { of(text) != nil ? Spot.last(in: text) : nil }
 
     /// The battery level (0–100) a check-in carries, if any.
     public static func battery(in text: String) -> Int? {

@@ -44,15 +44,21 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         heading = nil
     }
 
-    /// My position for a check-in: a fix from the last 2 minutes, else a new one, waiting at most 10 seconds.
-    /// nil if location is off, not allowed, or the phone can't get a fix in time. Main thread.
+    /// My position for a check-in, only if I share it (Settings). See `fix`.
     func forCheckIn(_ done: @escaping (Spot?) -> Void) {
-        guard Self.sharing, allowed else { return done(nil) }
+        guard Self.sharing else { return done(nil) }
+        fix(done)
+    }
+
+    /// My position: a fix from the last 2 minutes, else a new one, waiting at most 10 seconds. nil if location isn't
+    /// allowed or the phone can't get a fix in time. Main thread.
+    func fix(_ done: @escaping (Spot?) -> Void) {
+        guard allowed else { return done(nil) }
         let toSpot: (CLLocation?) -> Spot? = { l in
             guard let l, l.horizontalAccuracy >= 0, l.horizontalAccuracy <= 500 else { return nil }
             return Spot(lat: l.coordinate.latitude, lon: l.coordinate.longitude, accuracy: Int(l.horizontalAccuracy.rounded()))
         }
-        if let l = manager.location, -l.timestamp.timeIntervalSinceNow < 120, toSpot(l) != nil { return done(toSpot(l)) }
+        if let l = manager.location, -l.timestamp.timeIntervalSinceNow < 120, toSpot(l) != nil { location = l; return done(toSpot(l)) }
         var finished = false
         let finish: (CLLocation?) -> Void = { l in if !finished { finished = true; done(toSpot(l)) } }
         waiting.append(finish)

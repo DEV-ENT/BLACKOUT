@@ -2,18 +2,34 @@ import SwiftUI
 import CoreLocation
 import BlackoutCore
 
-/// Compass to a friend: an arrow toward where they last checked in with their position, and how far it is.
+/// Compass to a friend or a shared place: an arrow toward it, and how far it is.
 /// GPS and the compass work without internet.
 struct FindSheet: View {
-    let person: Person
+    let title: String
+    let name: String          // card title
+    let target: Spot
+    let ts: Int64             // when the position was shared
+    let detail: (String) -> String // "Where Marco checked in 2 min ago": gets the age
+    var chip: (String, Color)? = nil
+    var tint = Theme.text
     @ObservedObject private var loc = LocationService.shared
 
+    init(person: Person) {
+        title = "Find \(person.name)"; name = person.name; target = person.spot ?? Spot(lat: 0, lon: 0); ts = person.spotTs
+        detail = { "Where \(person.name) checked in \($0)" }
+        chip = person.checkIn.map { ($0.label, $0.color) }; tint = person.checkIn?.color ?? Theme.text
+    }
+
+    init(place: Place, by: String, ts: Int64) {
+        title = place.kind.word; name = place.note.isEmpty ? place.kind.word : place.note
+        target = place.spot ?? Spot(lat: 0, lon: 0); self.ts = ts
+        detail = { "Shared by \(by) \($0)" }
+    }
+
     var body: some View {
-        SheetPage(title: "Find \(person.name)") {
-            if let target = person.spot {
-                TimelineView(.periodic(from: .now, by: 30)) { t in
-                    content(target, now: t.date)
-                }
+        SheetPage(title: title) {
+            TimelineView(.periodic(from: .now, by: 30)) { t in
+                content(target, now: t.date)
             }
         }
         .onAppear { loc.watch() }
@@ -49,12 +65,12 @@ struct FindSheet: View {
         .padding(.vertical, 8)
 
         Card {
-            HStack {
-                Text(person.name).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
+            HStack(alignment: .firstTextBaseline) {
+                Text(name).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
                 Spacer()
-                if let c = person.checkIn { Chip(c.label, c.color) }
+                if let chip { Chip(chip.0, chip.1) }
             }
-            Text("Where \(person.name) checked in \(ago(person.spotTs, now))" + (target.accuracy.map { ", within about \(Self.meters(Double($0)))" } ?? "") + ".")
+            Text(detail(ago(ts, now)) + (target.accuracy.map { ", within about \(Self.meters(Double($0)))" } ?? "") + ".")
                 .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             if loc.heading == nil && me != nil {
                 Text("This phone has no compass right now, so the arrow assumes the top of the phone points north.")
@@ -74,18 +90,18 @@ struct FindSheet: View {
             Circle().stroke(Theme.line, lineWidth: 2).padding(14)
             Image(systemName: "location.north.fill")
                 .font(.system(size: 96, weight: .bold))
-                .foregroundStyle(me == nil ? Theme.faint : (person.checkIn?.color ?? Theme.text))
+                .foregroundStyle(me == nil ? Theme.faint : tint)
                 .rotationEffect(.degrees(angle))
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: angle)
         }
         .frame(width: 240, height: 240)
         .accessibilityElement()
-        .accessibilityLabel(me.map { "\(person.name) is \(Geo.compassWord(Geo.bearing($0, target))) of you" } ?? "Finding your position")
+        .accessibilityLabel(me.map { "\(name) is \(Geo.compassWord(Geo.bearing($0, target))) of you" } ?? "Finding your position")
     }
 
     private func openInMaps(_ s: Spot) {
         var c = URLComponents(string: "maps://")!
-        c.queryItems = [.init(name: "ll", value: "\(s.lat),\(s.lon)"), .init(name: "q", value: person.name)]
+        c.queryItems = [.init(name: "ll", value: "\(s.lat),\(s.lon)"), .init(name: "q", value: name)]
         if let url = c.url { UIApplication.shared.open(url) }
     }
 
