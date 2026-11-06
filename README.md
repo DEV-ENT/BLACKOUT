@@ -37,9 +37,18 @@ There are two apps that work together: one for **Android** and one for **iPhone*
   - "Create a group" makes a strong random code. Friends join by scanning the invite QR with their phone camera, or by an invite link sent over AirDrop, Quick Share or any app. The same `darkproof://join` links work on both apps.
   - The People tab shows who is in your group, who is in range now, and when you last heard from everyone else.
   - **I'm safe** and **Need help** check-in buttons.
-  - Groups you leave are kept, so you can switch back.
+  - Groups you leave are kept (up to 20), so you can switch back.
+  - Typed codes are tidied (lowercase, spaces, missing dashes, pasted links), and DarkProof has its own QR scanner.
+  - Each group shows five emoji to compare out loud with a friend's phone, which catches a fake invite QR.
 - **Safety features (iPhone and Android):**
   - Check-ins carry your battery level and, if you turn it on, your position. A compass points to a friend's last known position.
+  - **I need help** with one tap, then optional details: injured, trapped, need water, food, medicine or shelter, and how many people.
+  - **Are you safe?** asks your group, or one person, who answer with one tap (also from the notification).
+  - **Check in for someone else** ("Grandma is safe"), always shown as reported by you.
+  - **Shortcuts:** "I'm safe" and "I need help" from Siri, Spotlight, the Action button and Shortcuts on iPhone; a quick-settings tile and app shortcuts on Android.
+  - **Get ready** checklist on Home (invite people, save the map, download the AI, add the shortcut, practise) and a **practice run** that sends nothing.
+  - **Plus Codes** next to every position, easy to read out over a radio or a phone call.
+  - Alerts inside the app too, unread badges, and every saved group is read, so a family member's "I need help" reaches you while another group is open.
   - **Places:** share where there is water, shelter, charging or medical help, for everyone nearby.
   - **Small photos** (up to 14 KB) for your group, and **delivery status** ("Delivered to Anna").
   - **Offline street maps:** save about 10 km around you while you have internet (OpenFreeMap, up to 50 MB).
@@ -66,6 +75,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 | `ios/Vendor/fetch-llama.sh` | Downloads the pinned llama.cpp build for iPhone |
 | `spec/FORMAT.md` | Wire format and Bluetooth LE protocol, shared by both apps |
 | `spec/test-vectors.txt` | Byte-exact examples that both apps' tests check |
+| `site/` | The darkproof.app website: home, privacy policy, invite-link page and app-link files (see `site/README.md`) |
 | `tools/` | Test tools: a Mac Bluetooth LE test peer, an AI check, and the test-vector generator |
 
 ## Build
@@ -143,6 +153,7 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - Two iPhone Simulators connecting over Apple peer-to-peer.
 - Online mode, live on public relays (emulator and Simulator with no other link): group messages, photos, check-ins, receipts and Everyone messages in both directions; Sent and Delivered labels; no re-posting after restarts.
 - Tor built into both apps, live: each linked to the relays through its own Tor, messages crossed both ways, and no connection went around Tor (checked with `lsof` and `/proc/net/tcp`). With Tor on but not running, nothing reached the relays.
+- Between an Android emulator and an iPhone Simulator over the Wi-Fi network link, with internet off: "I need help" with needs and head count, "Are you safe?" and its one-tap answer, check-ins, photos and delivery receipts in both directions.
 - A real iPhone 15 exchanging messages with a Mac over real Bluetooth LE.
 - The AI running on a real iPhone 15.
 - On a real iPhone 15, over real Bluetooth LE: messages arrive while the phone is locked, and the link comes back after the other side restarts.
@@ -156,6 +167,7 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - MeshCore radios: built from MeshCore's source code and tested byte by byte, but never connected to a real radio.
 - iPhone and Android over real Bluetooth.
 - Online mode and Tor on real phones over mobile data, and how relays rate-limit many phones behind one carrier address.
+- The relay changes since the live test (catch-up per mailbox, "Sent" only after a relay accepts, existence checks), the Bluetooth link limits, shortcuts from Siri and the Action button, the Android quick-settings tile from the lock screen, battery estimates, and restart after reboot.
 - iPhone to iPhone on real devices.
 - LoRa with real Meshtastic radios.
 - Battery use and range.

@@ -26,8 +26,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -48,18 +50,44 @@ import java.util.Locale
 
 // MARK: - Chat
 
+/** A chat row: a day header or a message. */
+private sealed class ChatRow(val key: String) {
+    class Day(val label: String, key: String) : ChatRow(key)
+    class Msg(val m: Message, val firstOfRun: Boolean) : ChatRow(m.id)
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, open: (Sheet) -> Unit) {
     val ctx = LocalContext.current
-    var everyone by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf("") }
+    val a = ctx as MainActivity
+    val everyone = s.everyone
+    val channel = if (everyone) "" else g.code // drafts are kept per channel
+    val draft = s.drafts[channel] ?: ""
     val shown = remember(messages, everyone) { messages.filter { it.public == everyone } }
     // Receipts change no message, so the list above stays the same: delivery states are read again on every update.
     val tick = s.tick
     val deliveries = remember(tick, shown) { shown.filter { it.sender == MeshEngine.deviceId }.associate { it.id to MeshEngine.delivery(it) } }
+    val rows = remember(shown) {
+        val out = ArrayList<ChatRow>(shown.size + 8); var day = -1
+        shown.forEachIndexed { i, m ->
+            val d = dayOf(m.ts)
+            if (d != day) { day = d; out += ChatRow.Day(dayLabel(ctx, m.ts), "day-$d") }
+            out += ChatRow.Msg(m, i == 0 || shown[i - 1].sender != m.sender || CheckIn.of(shown[i - 1].text) != null || dayOf(shown[i - 1].ts) != d)
+        }
+        out
+    }
+    val lastMine = remember(shown) { shown.lastOrNull { it.sender == MeshEngine.deviceId && CheckIn.of(it.text) != null } }
     val list = rememberLazyListState()
-    LaunchedEffect(shown.size, everyone) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1, 100_000) } // the offset is clamped: the very end
+    // To the end when the chat opens; for a new message only if it is mine or the list was already at the end.
+    var counted by remember(everyone, g) { mutableIntStateOf(-1) }
+    LaunchedEffect(rows.size, everyone, g) {
+        if (rows.isEmpty()) return@LaunchedEffect
+        val lastSeen = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val atEnd = counted < 0 || lastSeen >= counted - 1
+        if (atEnd || shown.lastOrNull()?.sender == MeshEngine.deviceId) list.scrollToItem(rows.size - 1, 100_000) // the offset is clamped: the very end
+        counted = rows.size
+    }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) Thread {
             val jpeg = PhotoShrinker.jpeg(ctx, uri)
@@ -72,7 +100,7 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().padding(bottom = if (typing) 0.dp else 84.dp)) { // room for the tab bar
         Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ScreenTitle(g.name, if (phones == 1) "1 phone in range" else "$phones phones in range")
-            PillSwitch(g.name, "Everyone", everyone) { everyone = it }
+            PillSwitch(g.name, "Everyone", everyone) { s.everyone = it }
             Txt(if (everyone) "Anyone with DarkProof can read these, nearby or online." else "Only people in ${g.name} can read these.", 14, color = Theme.dim)
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -83,22 +111,27 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
                     Txt(if (everyone) "Messages here reach everyone, nearby or online." else "Say hi, or tap I'm safe on Home.", 15, color = Theme.dim)
                 }
             }
-            itemsIndexed(shown, key = { _, m -> m.id }) { i, m ->
-                val firstOfRun = i == 0 || shown[i - 1].sender != m.sender || CheckIn.of(shown[i - 1].text) != null
-                MessageRow(m, firstOfRun, deliveries[m.id], open) { s.moderated++ }
+            items(rows, key = { it.key }) { r ->
+                when (r) {
+                    is ChatRow.Day -> Txt(r.label, 13, FontWeight.SemiBold, Theme.dim, Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp).wrapContentWidth())
+                    is ChatRow.Msg -> MessageRow(r.m, r.firstOfRun, deliveries[r.m.id], s.name,
+                        lastMine?.takeIf { it.ts > r.m.ts }?.let { CheckIn.of(it.text) }, open, { s.moderated++ }) { c ->
+                        if (c == CheckIn.SAFE) checkIn(a, s, CheckIn.SAFE, group = r.m.group) else { s.helpGroup = r.m.group; s.askHelp = true }
+                    }
+                }
             }
         }
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!everyone) RoundIcon(R.drawable.ic_photo_camera, 52.dp, desc = "Send a photo") {
                 pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             }
-            TextBox(draft, { draft = it.take(1000) }, if (everyone) "Message everyone" else "Message ${g.name}", singleLine = false,
+            TextBox(draft, { s.drafts[channel] = it.take(1000) }, if (everyone) "Message everyone" else "Message ${g.name}", singleLine = false,
                 keyboard = KeyboardOptions(KeyboardCapitalization.Sentences), modifier = Modifier.weight(1f), shape = RoundedCornerShape(26.dp))
             RoundIcon(R.drawable.ic_arrow_upward, 52.dp, tint = if (draft.isBlank()) Theme.dim else Color.Black,
                 bg = if (draft.isBlank()) Theme.tile else Color.White, desc = "Send") {
                 val t = draft.trim()
                 if (t.isNotEmpty() && meshReady(ctx)) {
-                    draft = ""
+                    s.drafts.remove(channel)
                     val pub = everyone
                     Thread {
                         val fits = MeshEngine.send(t, pub)
@@ -112,28 +145,39 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
     }
 }
 
+/**
+ * One message: a check-in, a report about someone, an "are you safe?" question (with one-tap answers when it is for
+ * me), a place, or text and photo. Hold it to copy the text, and someone else's to block them or report it (Everyone).
+ */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, open: (Sheet) -> Unit, moderated: () -> Unit) {
+private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, myName: String, answered: CheckIn?,
+                       open: (Sheet) -> Unit, moderated: () -> Unit, answer: (CheckIn) -> Unit) {
     val ctx = LocalContext.current
     val me = m.sender == MeshEngine.deviceId
     val check = if (!m.public) CheckIn.of(m.text) else null
+    val vouch = if (!m.public) Vouch.of(m.text) else null
+    val ask = if (!m.public) AreYouSafe.of(m.text) else null
     val place = if (m.public) Place.of(m.text) else null
     val time = clock(ctx, m.ts)
     var menu by remember { mutableStateOf(false) }
     var confirmBlock by remember { mutableStateOf(false) }
-    // Hold someone else's message for Block (and Report on the Public channel).
-    val hold = if (me) Modifier else Modifier.combinedClickable(onLongClick = { menu = true }, onClick = {})
+    val hold = Modifier.combinedClickable(onLongClick = { menu = true }, onClick = {}, onLongClickLabel = "Message options")
     if (confirmBlock) Confirm("Block ${m.name}?", "You won't see their messages, places or check-ins on this phone. You can unblock them in Settings.", "Block", danger = true,
         onYes = { confirmBlock = false; Moderation.block(ctx, m.sender, m.name); moderated() }, onNo = { confirmBlock = false })
-    DropdownMenu(menu, { menu = false }, containerColor = Theme.card) {
-        DropdownMenuItem(text = { Txt("Block ${m.name}", 16) }, onClick = { menu = false; confirmBlock = true })
-        if (m.public) DropdownMenuItem(text = { Txt("Report this message", 16, color = Theme.help) }, onClick = {
+    // Shown under the message held (anchored to the Box around it).
+    val options: @Composable () -> Unit = { DropdownMenu(menu, { menu = false }, containerColor = Theme.card) {
+        DropdownMenuItem(text = { Txt("Copy text", 16) }, onClick = { menu = false; copyText(ctx, "Message", if (m.photo != null) Photo.caption(m.text) else m.text) })
+        if (!me) DropdownMenuItem(text = { Txt("Block ${m.name}", 16) }, onClick = { menu = false; confirmBlock = true })
+        if (!me && m.public) DropdownMenuItem(text = { Txt("Report this message", 16, color = Theme.help) }, onClick = {
             menu = false; Moderation.hide(ctx, m.id); NostrReports.report(ctx, m.id); moderated()
-            Toast.makeText(ctx, "Reported and hidden", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Reported and hidden on this phone", Toast.LENGTH_SHORT).show()
         })
-    }
-    Column(Modifier.fillMaxWidth().then(hold).padding(top = if (firstOfRun) 8.dp else 0.dp), horizontalAlignment = if (me && check == null && place == null) Alignment.End else Alignment.Start) {
+    } }
+    val card = check != null || vouch != null || ask != null || place != null
+    Box(Modifier.fillMaxWidth()) {
+    options()
+    Column(Modifier.fillMaxWidth().then(hold).padding(top = if (firstOfRun) 8.dp else 0.dp), horizontalAlignment = if (me && !card) Alignment.End else Alignment.Start) {
         when {
             check != null -> {
                 val c = if (check == CheckIn.HELP) Theme.help else Theme.safe
@@ -141,13 +185,52 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, ope
                     verticalAlignment = Alignment.CenterVertically) {
                     Ic(if (check == CheckIn.HELP) R.drawable.ic_sos else R.drawable.ic_verified_user, c, 26.dp)
                     Spacer(Modifier.width(14.dp))
-                    val who = if (me) (if (check == CheckIn.HELP) "You need help" else "You're safe") else (if (check == CheckIn.HELP) "${m.name} needs help" else "${m.name} is safe")
-                    Txt(who, 18, FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 2)
+                    Column(Modifier.weight(1f)) {
+                        val who = if (me) (if (check == CheckIn.HELP) "You need help" else "You're safe") else (if (check == CheckIn.HELP) "${m.name} needs help" else "${m.name} is safe")
+                        Txt(who, 18, FontWeight.SemiBold, maxLines = 2)
+                        val extra = (CheckIn.needs(m.text).sortedBy { it.ordinal }.map { it.label } +
+                            listOfNotNull(CheckIn.people(m.text)?.takeIf { it > 1 }?.let { "$it people" })).joinToString(" · ")
+                        if (extra.isNotEmpty()) Txt(extra, 15)
+                    }
                     CheckIn.battery(m.text)?.let { BatteryLabel(it); Spacer(Modifier.width(12.dp)) }
                     Txt(time, 15, color = Theme.dim)
                 }
-                CheckIn.spot(m.text)?.let { sp ->
-                    if (!me) Txt("Find ${m.name}", 14, FontWeight.SemiBold, Theme.dim, Modifier.clickable { open(Sheet.Find(m.name, sp, m.ts)) }.padding(start = 18.dp, top = 6.dp))
+                CheckIn.spot(m.text)?.let { sp -> SpotLinks(if (me) null else "Find ${m.name}", sp) { open(Sheet.Find(m.name, sp, m.ts)) } }
+                if (me) Status(delivery, null)
+            }
+            vouch != null -> {
+                val c = if (vouch.status == CheckIn.HELP) Theme.help else Theme.safe
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Theme.card).padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Ic(R.drawable.ic_group, c, 26.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Txt("${vouch.subject} ${if (vouch.status == CheckIn.HELP) "needs help" else "is safe"}", 18, FontWeight.SemiBold, c, maxLines = 2)
+                        val extra = (vouch.needs.sortedBy { it.ordinal }.map { it.label } + listOfNotNull(vouch.people?.takeIf { it > 1 }?.let { "$it people" })).joinToString(" · ")
+                        if (extra.isNotEmpty()) Txt(extra, 15)
+                        Txt("Reported by ${if (me) "you" else m.name}", 14, color = Theme.dim)
+                    }
+                    Txt(time, 15, color = Theme.dim)
+                }
+                vouch.spot?.let { sp -> SpotLinks("Find ${vouch.subject}", sp) { open(Sheet.Find(vouch.subject, sp, m.ts)) } }
+                if (me) Status(delivery, null)
+            }
+            ask != null -> {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Theme.card).padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Ic(R.drawable.ic_notifications, Theme.text, 26.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Txt("${if (me) "You" else m.name} asked: ${m.text.removePrefix("❓ ")}", 17, FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Txt(time, 15, color = Theme.dim)
+                    }
+                    // Answered already (a check-in of mine came after the question): no buttons.
+                    if (!me && ask.isFor(myName) && answered != null)
+                        Txt("You answered: ${if (answered == CheckIn.HELP) "I need help" else "I'm safe"}", 15, color = Theme.dim)
+                    else if (!me && ask.isFor(myName)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CapsuleChoice("I'm safe", Theme.safe, Color.Black, Modifier.weight(1f)) { answer(CheckIn.SAFE) }
+                        CapsuleChoice("I need help", Theme.help, Color.White, Modifier.weight(1f)) { answer(CheckIn.HELP) }
+                    }
                 }
                 if (me) Status(delivery, null)
             }
@@ -159,6 +242,7 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, ope
                     Column(Modifier.weight(1f)) {
                         Txt("${if (me) "You" else m.name} shared ${place.kind.word.lowercase()}", 16, FontWeight.SemiBold)
                         if (place.note.isNotEmpty()) Txt(place.note, 15, color = Theme.dim)
+                        place.spot?.let { PlusCodeLabel(it, 13) }
                     }
                     Txt(time, 14, color = Theme.dim)
                 }
@@ -180,6 +264,15 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, ope
             }
         }
     }
+    }
+}
+
+/** Under a check-in with a position: "Find Anna" and its Plus Code (tap to copy). */
+@Composable
+private fun SpotLinks(find: String?, sp: Spot, open: () -> Unit) = Row(Modifier.padding(start = 18.dp, top = 4.dp),
+    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    if (find != null) Txt(find, 14, FontWeight.SemiBold, Theme.text, Modifier.clip(CircleShape).clickable(role = Role.Button, onClick = open).padding(vertical = 4.dp))
+    PlusCodeLabel(sp)
 }
 
 /** Under my messages: still waiting, given to a phone, or confirmed by group members. */
@@ -203,7 +296,9 @@ private fun Status(d: Delivery?, time: String?) {
 
 // MARK: - Places
 
-private data class Shared(val place: Place, val by: String, val ts: Long, val id: String)
+private data class Shared(val place: Place, val by: String, val ts: Long, val id: String) {
+    val old get() = Place.freshness(ts) == Freshness.OLD
+}
 
 @DrawableRes fun kindIcon(k: PlaceKind) = when (k) {
     PlaceKind.WATER -> R.drawable.ic_water_drop; PlaceKind.SHELTER -> R.drawable.ic_house
@@ -212,14 +307,14 @@ private data class Shared(val place: Place, val by: String, val ts: Long, val id
 
 @Composable fun KindIcon(k: PlaceKind) = Box(Modifier.size(48.dp).background(Theme.tile, CircleShape), contentAlignment = Alignment.Center) { Ic(kindIcon(k), Theme.text, 24.dp) }
 
-/** My position while a screen that needs it is open. */
 /**
  * Runs [start] while the app is on screen, and the stop function it returns when the app goes to the background or this
- * part of the screen goes away: GPS and the compass sensor must not keep running behind a closed app.
+ * part of the screen goes away: GPS and the compass sensor must not keep running behind a closed app. A new [key]
+ * (e.g. location was just allowed) starts it again.
  */
-@Composable fun WhileOnScreen(start: () -> (() -> Unit)) {
+@Composable fun WhileOnScreen(key: Any? = null, start: () -> (() -> Unit)) {
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
+    DisposableEffect(lifecycle, key) {
         var stop: (() -> Unit)? = null
         val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
             if (e == androidx.lifecycle.Lifecycle.Event.ON_START && stop == null) stop = start()
@@ -230,45 +325,48 @@ private data class Shared(val place: Place, val by: String, val ts: Long, val id
     }
 }
 
+/** My position while a screen that needs it is open. */
 @Composable fun rememberMySpot(): Spot? {
     val ctx = LocalContext.current
     var spot by remember { mutableStateOf<Spot?>(null) }
-    WhileOnScreen { Locator.watch(ctx) { spot = it } }
+    val allowed = Perms.version.let { Locator.allowed(ctx) }
+    WhileOnScreen(allowed) { Locator.watch(ctx) { spot = it } }
     return spot
 }
 
 @Composable
-fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
-    var filter by remember { mutableStateOf<PlaceKind?>(null) }
+fun PlacesTab(s: AppState, messages: List<Message>, open: (Sheet) -> Unit) {
+    var filter by rememberSaveable { mutableStateOf<PlaceKind?>(null) }
     val me = rememberMySpot()
-    val all = remember(messages) {
-        messages.filter { it.public }.mapNotNull { m -> Place.of(m.text)?.let { Shared(it, if (m.sender == MeshEngine.deviceId) "you" else m.name, m.ts, m.id) } }
+    val all = remember(messages) { // expired places (older than 7 days) are hidden
+        messages.filter { it.public && Place.freshness(it.ts) != Freshness.EXPIRED }
+            .mapNotNull { m -> Place.of(m.text)?.let { Shared(it, if (m.sender == MeshEngine.deviceId) "you" else m.name, m.ts, m.id) } }
     }
     val shown = remember(all, filter, me) {
         val f = all.filter { filter == null || it.place.kind == filter }
-        if (me == null) f.sortedByDescending { it.ts }
-        else f.sortedWith(compareBy<Shared> { it.place.spot?.let { s -> Geo.distance(me, s) } ?: Double.MAX_VALUE }.thenByDescending { it.ts })
+        if (me == null) f.sortedWith(compareBy<Shared> { it.old }.thenByDescending { it.ts })
+        else f.sortedWith(compareBy<Shared> { it.old }.thenBy { it.place.spot?.let { sp -> Geo.distance(me, sp) } ?: Double.MAX_VALUE }.thenByDescending { it.ts })
     }
-    var onMap by remember { mutableStateOf(false) }
-    if (onMap) {
+    if (s.placesMap) {
+        var center by remember { mutableStateOf<Spot?>(null) }
         val people = remember(messages) { Person.all(messages, MeshEngine.deviceId) }
         val pins = remember(all, people) {
-            all.mapNotNull { sh -> sh.place.spot?.let { Pin(sh.place.kind.word + if (sh.place.note.isNotEmpty()) ": " + sh.place.note.take(40) else "", it, sh.ts, "#FFFFFF") } } +
+            all.mapNotNull { sh -> sh.place.spot?.let { Pin(sh.place.kind.word + if (sh.place.note.isNotEmpty()) ": " + sh.place.note.take(40) else "", it, sh.ts, if (sh.old) "#6B6B6B" else "#FFFFFF") } } +
                 people.mapNotNull { p -> p.spot?.let { Pin(p.name, it, p.spotTs, when (p.checkIn) { CheckIn.HELP -> "#FF453B"; CheckIn.SAFE -> "#33D64A"; null -> "#949494" }) } }
         }
         Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ScreenTitle("Places", "Shared by anyone with DarkProof, nearby or online")
-            PillSwitch("List", "Map", onMap) { onMap = it }
-            StreetMap(pins, me, Modifier.fillMaxWidth().weight(1f), open)
-            Txt("Map data © OpenStreetMap contributors · OpenFreeMap · OpenMapTiles", 12, color = Theme.faint)
-            OfflineMapCard(me)
+            PillSwitch("List", "Map", true) { s.placesMap = it }
+            StreetMap(pins, me, Modifier.fillMaxWidth().weight(1f), open) { center = it }
+            Txt("Map data © OpenStreetMap contributors · OpenFreeMap · OpenMapTiles", 12, color = Theme.dim)
+            OfflineMapCard(me, center)
         }
         return
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ScreenTitle("Places", "Shared by anyone with DarkProof, nearby or online")
-        PillSwitch("List", "Map", onMap) { onMap = it }
+        PillSwitch("List", "Map", false) { s.placesMap = it }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip("All", null, filter == null) { filter = null }
             PlaceKind.entries.forEach { k -> FilterChip(k.word, kindIcon(k), filter == k) { filter = k } }
@@ -281,13 +379,14 @@ fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
             shown.forEach { sh ->
                 val sp = sh.place.spot
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(enabled = sp != null) { sp?.let { open(Sheet.Find(sh.place.kind.word, it, sh.ts)) } }
-                    .padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    .alpha(if (sh.old) 0.55f else 1f).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     KindIcon(sh.place.kind)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Txt(sh.place.kind.word, 18, FontWeight.Bold)
                         if (sh.place.note.isNotEmpty()) Txt(sh.place.note, 16, color = Theme.text.copy(alpha = 0.85f))
-                        Txt("By ${sh.by} · ${ago(sh.ts)}", 14, color = Theme.faint)
+                        Txt(if (sh.old) "Old: by ${sh.by}, ${ago(sh.ts)}. It may have changed." else "By ${sh.by} · ${ago(sh.ts)}", 14, color = Theme.dim)
+                        sp?.let { PlusCodeLabel(it) }
                     }
                     if (sp != null) Column(horizontalAlignment = Alignment.End) {
                         if (me != null) {
@@ -300,6 +399,7 @@ fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
             }
         }
         if (me == null && all.any { it.place.spot != null }) Txt("Finding your position to sort places by distance…", 14, color = Theme.dim)
+        Txt("Places disappear 7 days after they were shared. Older than a day, they are greyed out.", 14, color = Theme.dim)
     }
 }
 
@@ -313,17 +413,22 @@ fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
 @Composable
 fun AddPlaceSheet(close: () -> Unit) {
     val ctx = LocalContext.current
-    var kind by remember { mutableStateOf(PlaceKind.WATER) }
-    var note by remember { mutableStateOf("") }
-    var withSpot by remember { mutableStateOf(true) }
+    val a = ctx as MainActivity
+    var kind by rememberSaveable { mutableStateOf(PlaceKind.WATER) }
+    var note by rememberSaveable { mutableStateOf("") }
+    var withSpot by rememberSaveable { mutableStateOf(true) }
     var sending by remember { mutableStateOf(false) }
+    var cancel by remember { mutableStateOf<(() -> Unit)?>(null) }
+    DisposableEffect(Unit) { onDispose { cancel?.invoke() } } // closed while finding the position: nothing is posted
+    val allowed = Perms.version.let { Locator.allowed(ctx) }
+    val empty = note.isBlank() && !(withSpot && allowed) // a place with neither details nor a position helps no one
     SheetPage("Share a place", close) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             PlaceKind.entries.chunked(2).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { k ->
                         val on = k == kind
-                        Row(Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(if (on) Color.White else Theme.card).clickable { kind = k }
+                        Row(Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(if (on) Color.White else Theme.card).clickable(role = Role.RadioButton) { kind = k }
                             .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Ic(kindIcon(k), if (on) Color.Black else Theme.text, 24.dp); Spacer(Modifier.width(10.dp))
                             Txt(k.word, 17, FontWeight.SemiBold, if (on) Color.Black else Theme.text)
@@ -335,13 +440,23 @@ fun AddPlaceSheet(close: () -> Unit) {
         InputField("Details", note, { note = it.take(Place.MAX_NOTE) }, "Tap at the school gym, bring bottles", singleLine = false,
             keyboard = KeyboardOptions(KeyboardCapitalization.Sentences))
         Card { SwitchRow("Add my current position", withSpot, { withSpot = it }, "So people can find it with the compass. Share it only if you are at the place.") }
-        if (withSpot && !Locator.allowed(ctx)) Txt("Location is off for DarkProof: the place will be shared without a position.", 14, color = Theme.help)
-        Txt("Anyone with DarkProof can see it, nearby or online. It stays on phones and relays for up to 7 days.", 14, color = Theme.dim)
-        PrimaryButton(if (sending) "Finding your position…" else "Share", enabled = !sending) {
-            if (!meshReady(ctx)) return@PrimaryButton
-            fun go(sp: Spot?) { Thread { MeshEngine.send(Place(kind, note, sp).text, public = true) }.start(); close() }
-            if (withSpot && Locator.allowed(ctx)) { sending = true; Locator.fix(ctx) { go(it) } } else go(null)
+        if (withSpot && !allowed) {
+            Txt("Location isn't allowed for DarkProof: the place can only go out with its details.", 14, color = Theme.help)
+            GhostButton("Allow location") { a.askLocation() }
         }
+        Txt("Anyone with DarkProof can see it, nearby or online. Once shared it can't be taken back, but it disappears after 7 days.", 14, color = Theme.dim)
+        PrimaryButton(if (sending) "Finding your position…" else "Share", enabled = !sending && !empty) {
+            if (!meshReady(ctx)) return@PrimaryButton
+            fun go(sp: Spot?) {
+                cancel = null
+                if (sp == null && note.isBlank()) { sending = false; Toast.makeText(ctx, "No position found yet. Add details, or try again outside.", Toast.LENGTH_LONG).show(); return }
+                Thread { MeshEngine.send(Place(kind, note, sp).text, public = true) }.start()
+                Toast.makeText(ctx, if (withSpot && sp == null) "Shared without your position: no GPS fix yet" else "Shared with everyone", Toast.LENGTH_LONG).show()
+                close()
+            }
+            if (withSpot && allowed) { sending = true; cancel = Locator.fix(ctx) { go(it) } } else go(null)
+        }
+        if (empty) Txt("Add details or your position, so people can find it.", 14, color = Theme.dim)
     }
 }
 
@@ -351,7 +466,7 @@ fun AddPlaceSheet(close: () -> Unit) {
 fun PeopleTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<Message>, phones: Int, open: (Sheet) -> Unit) {
     val people = remember(messages) { Person.all(messages, MeshEngine.deviceId) }
     val mine = remember(messages) { messages.lastOrNull { !it.public && it.sender == MeshEngine.deviceId && CheckIn.of(it.text) != null } }
-    var confirmHelp by remember { mutableStateOf(false) }
+    var askAll by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -362,17 +477,25 @@ fun PeopleTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<Messag
             BigCheckIn("I'm safe", R.drawable.ic_verified_user, Theme.safe, Color.Black, Modifier.weight(1f)) {
                 checkIn(a, s, CheckIn.SAFE)
             }
-            BigCheckIn("I need help", R.drawable.ic_sos, Theme.help, Color.White, Modifier.weight(1f)) { confirmHelp = true }
+            BigCheckIn("I need help", R.drawable.ic_sos, Theme.help, Color.White, Modifier.weight(1f)) { s.helpGroup = null; s.askHelp = true }
         }
         mine?.let { m -> Txt("Your last check-in: ${if (CheckIn.of(m.text) == CheckIn.HELP) "need help" else "safe"}, ${ago(m.ts)}.", 15, color = Theme.dim) }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SecondaryButton("Ask everyone", Modifier.weight(1f), icon = R.drawable.ic_notifications) { askAll = true }
+            SecondaryButton("Check in for…", Modifier.weight(1f), icon = R.drawable.ic_group) { open(Sheet.Vouch) }
+        }
         if (people.isEmpty()) Card {
             Txt("No one from ${g.name} yet", 18, FontWeight.Bold)
-            Txt("Invite friends with a QR code, then keep DarkProof open near each other. People show up here once they write.", 15, color = Theme.dim)
-        } else Card(padding = 12.dp) { people.forEach { p -> PersonRow(p) { sp -> open(Sheet.Find(p.name, sp, p.spotTs)) } } }
+            Txt("Invite friends with a QR code. People show up here once they write or check in.", 15, color = Theme.dim)
+        } else Card(padding = 12.dp) {
+            people.forEach { p -> PersonRow(p, { open(Sheet.Person(p.id)) }) { sp -> open(Sheet.Find(p.name, sp, p.spotTs)) } }
+        }
+        Txt("“Check in for…” tells the group about someone without a phone, for example a neighbour you found.", 14, color = Theme.dim)
         SecondaryButton("Invite friends", icon = R.drawable.ic_qr_code_2) { open(Sheet.Invite) }
     }
-    if (confirmHelp) Confirm("Send “I need help”?", "Your group sees it right away${if (s.shareLocation) ", with where you are" else ""}. Then write in Chat what you need and where you are.",
-        "Send", danger = true, onYes = { confirmHelp = false; if (checkIn(a, s, CheckIn.HELP)) s.tab = 1 }, onNo = { confirmHelp = false })
+    if (askAll) Confirm("Ask if everyone is safe?", "Everyone in ${g.name} gets “Is everyone safe?” with one-tap answers.", "Ask",
+        onYes = { askAll = false; if (meshReady(a)) { Thread { MeshEngine.send(AreYouSafe().text) }.start(); Toast.makeText(a, "Asked ${g.name}", Toast.LENGTH_SHORT).show() } },
+        onNo = { askAll = false })
 }
 
 /** The big check-in tiles, in the logo's shape. */
@@ -395,24 +518,29 @@ fun FindSheet(f: Sheet.Find, close: () -> Unit) {
     var heading by remember { mutableStateOf<Float?>(null) }
     var compass by remember { mutableStateOf(true) }
     WhileOnScreen { Compass.watch(ctx) { h -> if (h == null) compass = false else heading = h } }
+    val allowed = Perms.version.let { Locator.allowed(ctx) }
     SheetPage(f.title, close) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (me == null) {
                 Spacer(Modifier.height(40.dp))
-                Txt(if (Locator.allowed(ctx)) "Finding your position…" else "Allow location to see how far", 18, FontWeight.SemiBold, Theme.dim)
+                Txt(if (allowed) "Finding your position…" else "Allow location to see how far", 18, FontWeight.SemiBold, Theme.dim)
+                if (!allowed) GhostButton("Allow location") { (ctx as? MainActivity)?.askLocation() }
             } else {
                 val d = Geo.distance(me, f.spot); val b = Geo.bearing(me, f.spot)
                 val near = d <= maxOf(15, me.accuracy ?: 0, f.spot.accuracy ?: 0)
+                // The sensor gives magnetic north; positions use true north: add the declination where I am.
+                val north = heading?.let { it + Compass.declination(me) } ?: 0f
                 Box(Modifier.size(240.dp).background(Theme.card, CircleShape), contentAlignment = Alignment.Center) {
                     if (near) Ic(R.drawable.ic_my_location, Theme.safe, 96.dp)
-                    else Ic(R.drawable.ic_navigation, Theme.text, 120.dp, Modifier.rotate((b - (heading ?: 0f)).toFloat()))
+                    else Ic(R.drawable.ic_navigation, Theme.text, 120.dp, Modifier.rotate((b - north).toFloat()))
                 }
                 Txt(if (near) "Very close" else Geo.meters(d), 44, FontWeight.Black)
                 Txt(if (near) "Within about ${Geo.meters(maxOf(15.0, (me.accuracy ?: 15).toDouble()))}. Look around or call out." else "${Geo.compassWord(b)} of you", 18, color = Theme.dim)
             }
-            Txt("Position from ${ago(f.ts)}", 15, color = Theme.faint)
+            Txt("Position from ${ago(f.ts)}", 15, color = Theme.dim)
             if (!compass) Txt("This phone has no compass right now, so the arrow assumes the top of the phone points north.", 14, color = Theme.dim)
         }
+        Card(padding = 16.dp) { PlusCodeRow(f.spot) }
         SecondaryButton("Open in a map app", icon = R.drawable.ic_map) {
             val geo = String.format(Locale.ROOT, "geo:%.5f,%.5f?q=%.5f,%.5f", f.spot.lat, f.spot.lon, f.spot.lat, f.spot.lon)
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(geo))) }.onFailure { Toast.makeText(ctx, "No map app on this phone", Toast.LENGTH_LONG).show() }
@@ -577,25 +705,35 @@ fun markdown(text: String): AnnotatedString = buildAnnotatedString {
     }
 }
 
-/** The models this phone can run, with download, use and delete. */
+/** The models this phone can run, with download, use and delete. A big download on mobile data or with no internet asks first. */
 @Composable
 private fun ModelList() {
+    val ctx = LocalContext.current
+    var ask by remember { mutableStateOf<Pair<AiModel, String>?>(null) } // the model, and the network: "metered" or "none"
+    fun start(m: AiModel) {
+        LocalAi.spaceProblem(m)?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show(); return }
+        when (val net = LocalAi.network(ctx)) { "free" -> LocalAi.download(m); else -> ask = m to net }
+    }
     Txt("Models run entirely on this phone. Bigger ones answer better but slower. This phone has ${LocalAi.memoryGB} GB of memory: only models that fit are shown.",
         14, color = Theme.dim)
     if (LocalAi.catalog.isEmpty()) Txt("No model fits a phone with less than 4 GB of memory.", 15, FontWeight.SemiBold, Theme.help)
     LocalAi.catalog.forEach { m ->
         val st = LocalAi.states[m.id] ?: LocalAi.State.Missing
+        val gb = "%.1f".format(m.bytes / 1e9)
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Txt(m.title, 18, FontWeight.Bold, modifier = Modifier.weight(1f))
                 if (LocalAi.selected == m.id && st == LocalAi.State.Ready) Chip("In use", Theme.safe)
             }
             Txt(m.detail, 15, color = Theme.dim)
-            Txt("${"%.1f".format(m.bytes / 1e9)} GB · ${m.license}" + (LocalAi.typicalSeconds(m)?.let { " · about $it s per answer here" } ?: ""), 13, color = Theme.faint)
+            Txt("$gb GB · ${m.license}" + (LocalAi.typicalSeconds(m)?.let { " · about $it s per answer here" } ?: ""), 14, color = Theme.dim)
             when (st) {
-                LocalAi.State.Missing -> PrimaryButton("Download ${"%.1f".format(m.bytes / 1e9)} GB", icon = R.drawable.ic_download) { LocalAi.download(m) }
+                LocalAi.State.Missing -> {
+                    PrimaryButton("Download $gb GB", icon = R.drawable.ic_download) { start(m) }
+                    Txt("Big: use Wi-Fi if you can. It takes a while; you can keep using DarkProof.", 14, color = Theme.dim)
+                }
                 is LocalAi.State.Downloading -> {
-                    Txt("Downloading ${(st.progress * 100).toInt()}%. Keep the internet on.", 15, FontWeight.SemiBold)
+                    Txt(st.waiting ?: "Downloading ${(st.progress * 100).toInt()}%. Keep the internet on.", 15, FontWeight.SemiBold, if (st.waiting != null) Theme.dim else Theme.text)
                     Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(Theme.tile)) {
                         Box(Modifier.fillMaxWidth(st.progress.coerceIn(0.02f, 1f)).fillMaxHeight().background(Theme.text, CircleShape))
                     }
@@ -608,9 +746,22 @@ private fun ModelList() {
                 }
                 is LocalAi.State.Failed -> {
                     Txt(st.why, 15, color = Theme.help)
-                    GhostButton("Try again") { LocalAi.download(m) }
+                    GhostButton("Try again") { start(m) }
                 }
             }
         }
+    }
+    ask?.let { (m, net) ->
+        androidx.compose.material3.AlertDialog({ ask = null }, containerColor = Theme.card,
+            title = { Txt(if (net == "none") "No internet right now" else "You're on mobile data", 20, FontWeight.Bold) },
+            text = { Txt(if (net == "none") "DarkProof can download the ${"%.1f".format(m.bytes / 1e9)} GB model by itself as soon as there is Wi-Fi."
+                         else "This download is ${"%.1f".format(m.bytes / 1e9)} GB. On mobile data that can cost a lot or use up your plan.", 15, color = Theme.dim) },
+            confirmButton = {
+                Row {
+                    if (net != "none") androidx.compose.material3.TextButton({ ask = null; LocalAi.download(m, mobileData = true) }) { Txt("Use mobile data", 16, FontWeight.SemiBold, Theme.dim) }
+                    androidx.compose.material3.TextButton({ ask = null; LocalAi.download(m, mobileData = false) }) { Txt("Wait for Wi-Fi", 16, FontWeight.Bold) }
+                }
+            },
+            dismissButton = { androidx.compose.material3.TextButton({ ask = null }) { Txt("Cancel", 16, FontWeight.SemiBold, Theme.dim) } })
     }
 }

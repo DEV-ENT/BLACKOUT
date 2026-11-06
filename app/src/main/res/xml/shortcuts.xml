@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the DarkProof icon. "I need help" opens the question first, so it is never sent by mistake. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="safe" android:enabled="true" android:icon="@drawable/shortcut_safe"
+        android:shortcutShortLabel="@string/shortcut_safe" android:shortcutLongLabel="@string/shortcut_safe_long">
+        <intent android:action="it.darkproof.mesh.action.SAFE" android:targetPackage="it.darkproof.mesh" android:targetClass="it.blackout.mesh.MainActivity"/>
+    </shortcut>
+    <shortcut android:shortcutId="help" android:enabled="true" android:icon="@drawable/shortcut_help"
+        android:shortcutShortLabel="@string/shortcut_help" android:shortcutLongLabel="@string/shortcut_help_long">
+        <intent android:action="it.darkproof.mesh.action.HELP" android:targetPackage="it.darkproof.mesh" android:targetClass="it.blackout.mesh.MainActivity"/>
+    </shortcut>
+    <shortcut android:shortcutId="chat" android:enabled="true" android:icon="@drawable/shortcut_chat"
+        android:shortcutShortLabel="@string/shortcut_chat" android:shortcutLongLabel="@string/shortcut_chat_long">
+        <intent android:action="it.darkproof.mesh.action.CHAT" android:targetPackage="it.darkproof.mesh" android:targetClass="it.blackout.mesh.MainActivity"/>
+    </shortcut>
+</shortcuts>

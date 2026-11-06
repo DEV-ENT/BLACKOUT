@@ -19,6 +19,7 @@ struct StreetMap: UIViewRepresentable {
     let pins: [MapPin]
     let center: Spot?
     var open: (String) -> Void = { _ in } // pin id
+    var moved: (Spot?) -> Void = { _ in } // the middle of the map once zoomed in on an area (zoom 9+), else nil
 
     func makeUIView(context: Context) -> MLNMapView {
         let m = MLNMapView(frame: .zero, styleURL: OfflineMap.styleURL)
@@ -33,6 +34,7 @@ struct StreetMap: UIViewRepresentable {
 
     func updateUIView(_ m: MLNMapView, context: Context) {
         context.coordinator.open = open
+        context.coordinator.moved = moved
         let shown = (m.annotations ?? []).compactMap { $0 as? PinAnnotation }
         let current = Dictionary(pins.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         m.removeAnnotations(shown.filter { a in current[a.pin.id] != a.pin }) // gone or changed
@@ -60,7 +62,13 @@ struct StreetMap: UIViewRepresentable {
     final class Coordinator: NSObject, MLNMapViewDelegate {
         var centered: Bool
         var open: (String) -> Void = { _ in }
+        var moved: (Spot?) -> Void = { _ in }
         init(centered: Bool) { self.centered = centered }
+
+        func mapView(_ m: MLNMapView, regionDidChangeAnimated animated: Bool) {
+            let c = m.centerCoordinate, z = m.zoomLevel
+            DispatchQueue.main.async { self.moved(z >= 9 ? Spot(lat: c.latitude, lon: c.longitude) : nil) }
+        }
 
         func mapView(_ m: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
             guard let a = annotation as? PinAnnotation else { return nil }
@@ -100,38 +108,48 @@ struct StreetMap: UIViewRepresentable {
     }
 }
 
-/// Save, update or delete the offline map of your area.
+/// Save, update or delete the offline map of your area: around you, or around the middle of the map on screen when
+/// the phone has no position (location off, or no GPS fix indoors).
 struct OfflineMapCard: View {
     @ObservedObject var map = OfflineMap.shared
+    @ObservedObject private var loc = LocationService.shared
     let me: Spot?
+    var mapCenter: Spot? = nil
+    private var target: Spot? { me ?? mapCenter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch map.state {
             case .none:
-                Text("Save this map for the blackout").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                Text("Downloads the streets about 10 km around you (up to 50 MB) while you still have internet. Then the map works with none.")
-                    .font(.system(size: 14)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
-                download("Download map")
+                Text("Save this map for the blackout").scaledFont(17, .bold).foregroundStyle(Theme.text)
+                Text(me != nil ? "Downloads the streets about 10 km around you (up to 50 MB) while you still have internet. Then the map works with none."
+                               : "Downloads the streets about 10 km around the middle of the map (up to 50 MB) while you still have internet.")
+                    .scaledFont(14).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                if me == nil {
+                    Text(loc.denied ? "Location is off for DarkProof, so move and zoom the map to your area first."
+                                    : mapCenter == nil ? "Finding your position… or zoom the map to your area." : "No position yet: it saves the area on screen.")
+                        .scaledFont(14, .semibold).foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true)
+                }
+                download(me != nil ? "Download map" : "Save the area on screen")
             case .downloading(let p):
-                Text("Saving the map… \(Int(p * 100))%").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                Text("Saving the map… \(Int(p * 100))%").scaledFont(17, .bold).foregroundStyle(Theme.text)
                 ProgressLine(progress: p)
                 Button("Cancel") { map.cancel() }.buttonStyle(GhostButton())
             case .ready(let bytes, let center, let ts):
                 HStack(alignment: .firstTextBaseline) {
-                    Label("Saved for offline use", systemImage: "checkmark.circle.fill").font(.system(size: 15, weight: .bold))
+                    Label("Saved for offline use", systemImage: "checkmark.circle.fill").scaledFont(15, .bold)
                         .foregroundStyle(Theme.safe)
                     Spacer()
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)).font(.system(size: 13)).foregroundStyle(Theme.dim)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)).scaledFont(13).foregroundStyle(Theme.dim)
                 }
-                Text(savedText(center, ts)).font(.system(size: 14)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                Text(savedText(center, ts)).scaledFont(14).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
-                    download("Update to here", ghost: true)
+                    download(me != nil ? "Update to here" : "Save the area on screen", ghost: true)
                     Button("Delete") { map.delete() }.buttonStyle(GhostButton())
                 }
             case .failed(let why):
-                Text("The map wasn't saved").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                Text(why).font(.system(size: 14)).foregroundStyle(Theme.help)
+                Text("The map wasn't saved").scaledFont(17, .bold).foregroundStyle(Theme.text)
+                Text(why).scaledFont(14).foregroundStyle(Theme.help)
                 download("Try again")
             }
         }
@@ -150,7 +168,7 @@ struct OfflineMapCard: View {
     }
 
     @ViewBuilder private func download(_ title: String, ghost: Bool = false) -> some View {
-        let b = Button(me == nil ? "Finding your position…" : title) { if let me { map.download(around: me) } }.disabled(me == nil)
+        let b = Button(title) { if let t = target { map.download(around: t) } }.disabled(target == nil)
         if ghost { b.buttonStyle(GhostButton()) } else { b.buttonStyle(PrimaryButton()) }
     }
 }

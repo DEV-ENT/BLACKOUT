@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "it.darkproof.mesh",
+      "sha256_cert_fingerprints": [
+        "CE:AD:5F:CA:AD:EE:7F:98:70:B5:41:BE:50:30:FD:1B:93:60:7A:9F:62:30:39:1D:DB:5C:62:14:1C:97:8C:1E",
+        "RELEASE_KEY_SHA256"
+      ]
+    }
+  }
+]

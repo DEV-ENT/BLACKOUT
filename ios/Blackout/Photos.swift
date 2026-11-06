@@ -86,7 +86,7 @@ struct PhotoViewer: View {
                 Image(uiImage: ui).resizable().scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .frame(maxWidth: .infinity)
-                if !caption.isEmpty { Text(caption).font(.system(size: 17)).foregroundStyle(Theme.text) }
+                if !caption.isEmpty { Text(caption).scaledFont(17).foregroundStyle(Theme.text) }
                 ShareLink(item: Image(uiImage: ui), preview: SharePreview(caption.isEmpty ? "Photo" : caption, image: Image(uiImage: ui))) {
                     Label("Share or save", systemImage: "square.and.arrow.up")
                 }

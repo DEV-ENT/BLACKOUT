@@ -5,12 +5,16 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -24,6 +28,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
+import android.view.Surface
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -61,24 +67,34 @@ object Locator {
     private fun ageMs(l: Location) = (android.os.SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000
     private fun spot(l: Location) = Spot(l.latitude, l.longitude, l.accuracy.roundToInt().takeIf { l.hasAccuracy() })
 
-    /** A position at most 2 minutes old, waiting up to [waitMs] for a new one; null if there is none. */
+    /**
+     * A position at most 2 minutes old, waiting up to [waitMs] for a new one; null if there is none. Returns a cancel
+     * function: after it, [done] is never called (e.g. the sheet that asked was closed).
+     */
     @SuppressLint("MissingPermission")
-    fun fix(c: Context, waitMs: Long = 10_000, done: (Spot?) -> Unit) {
-        if (!allowed(c)) { done(null); return }
+    fun fix(c: Context, waitMs: Long = 10_000, done: (Spot?) -> Unit): () -> Unit {
+        if (!allowed(c)) { done(null); return {} }
         val lm = c.getSystemService(LocationManager::class.java)
         val providers = lm.getProviders(true)
         val recent = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
             .filter { ageMs(it) < 120_000 }.minByOrNull { it.accuracy }
-        if (recent != null) { done(spot(recent)); return }
+        if (recent != null) { done(spot(recent)); return {} }
         val provider = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).firstOrNull { it in providers }
-            ?: providers.firstOrNull { it != LocationManager.PASSIVE_PROVIDER } ?: run { done(null); return }
+            ?: providers.firstOrNull { it != LocationManager.PASSIVE_PROVIDER } ?: run { done(null); return {} }
         val h = Handler(Looper.getMainLooper()); var finished = false
         lateinit var listener: LocationListener
-        fun finish(s: Spot?) { if (!finished) { finished = true; lm.removeUpdates(listener); done(s) } }
+        fun finish(s: Spot?, report: Boolean = true) { if (!finished) { finished = true; lm.removeUpdates(listener); if (report) done(s) } }
         listener = listener { finish(spot(it)) }
-        lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+        try { lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()) } catch (_: RuntimeException) { finish(null); return {} }
         h.postDelayed({ finish(null) }, waitMs)
+        return { h.post { finish(null, report = false) } }
     }
+
+    /** Whether the phone's location setting is on (Android's switch, not DarkProof's permission). */
+    fun enabled(c: Context): Boolean = runCatching {
+        val lm = c.getSystemService(LocationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 28) lm.isLocationEnabled else lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }.getOrDefault(true)
 
     /** The phone's last position if it is at most 10 minutes old, without turning on GPS. */
     @SuppressLint("MissingPermission")
@@ -99,7 +115,7 @@ object Locator {
             .filter { ageMs(it) < 600_000 }.minByOrNull { it.accuracy }?.let { update(spot(it)) }
         val l = listener { update(spot(it)) }
         for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) if (p in providers)
-            lm.requestLocationUpdates(p, 3_000L, 2f, l, Looper.getMainLooper())
+            runCatching { lm.requestLocationUpdates(p, 3_000L, 2f, l, Looper.getMainLooper()) }
         return { lm.removeUpdates(l) }
     }
 
@@ -112,15 +128,25 @@ object Locator {
     }
 }
 
-/** Which way the top of the phone points, in degrees from north; null if the phone has no compass. */
+/**
+ * Which way the top of the screen points, in degrees from magnetic north; null if the phone has no compass. The sensor
+ * axes are turned with the screen, so the arrow stays right in landscape too. Add [declination] for true north.
+ */
 object Compass {
     fun watch(c: Context, update: (Float?) -> Unit): () -> Unit {
         val sm = c.getSystemService(SensorManager::class.java)
         val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) ?: run { update(null); return {} }
-        val rot = FloatArray(9); val o = FloatArray(3)
+        val rot = FloatArray(9); val turned = FloatArray(9); val o = FloatArray(3)
         val l = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
-                SensorManager.getRotationMatrixFromVector(rot, e.values); SensorManager.getOrientation(rot, o)
+                SensorManager.getRotationMatrixFromVector(rot, e.values)
+                val (x, y) = when (screenRotation(c)) {
+                    Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
+                    Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
+                    Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
+                    else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+                }
+                SensorManager.remapCoordinateSystem(rot, x, y, turned); SensorManager.getOrientation(turned, o)
                 update(((Math.toDegrees(o[0].toDouble()) + 360) % 360).toFloat())
             }
             override fun onAccuracyChanged(s: Sensor?, a: Int) {}
@@ -128,6 +154,43 @@ object Compass {
         sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
         return { sm.unregisterListener(l) }
     }
+
+    /** Degrees east of true north that magnetic north lies at [at] (Earth's field model): true = magnetic + this. */
+    fun declination(at: Spot, now: Long = System.currentTimeMillis()): Float =
+        runCatching { GeomagneticField(at.lat.toFloat(), at.lon.toFloat(), 0f, now).declination }.getOrDefault(0f)
+
+    @Suppress("DEPRECATION")
+    private fun screenRotation(c: Context): Int =
+        (if (Build.VERSION.SDK_INT >= 30) runCatching { c.display?.rotation }.getOrNull() else null)
+            ?: runCatching { c.getSystemService(android.view.WindowManager::class.java).defaultDisplay.rotation }.getOrDefault(Surface.ROTATION_0)
+}
+
+/** About how long the battery lasts, from how fast it dropped since it was last unplugged. */
+object BatteryLife {
+    /** Hours left at the rate of the last half hour or more, or null while that isn't known (or the phone charges). */
+    fun hoursLeft(c: Context, now: Long = System.currentTimeMillis()): Int? {
+        val bm = c.getSystemService(BatteryManager::class.java) ?: return null
+        val pct = batteryPercent(c) ?: return null
+        val prefs = c.getSharedPreferences("battery", 0)
+        if (bm.isCharging) { if (prefs.contains("t")) prefs.edit().clear().apply(); return null }
+        val t0 = prefs.getLong("t", 0); val p0 = prefs.getInt("p", -1)
+        if (t0 == 0L || p0 < pct || now < t0) { prefs.edit().putLong("t", now).putInt("p", pct).apply(); return null }
+        return estimate(pct, p0 - pct, (now - t0) / 3_600_000.0)
+    }
+
+    /** [drop] points in [hours]: meaningful after half an hour and 2 points, and only between 1 and 240 hours. */
+    fun estimate(pct: Int, drop: Int, hours: Double): Int? =
+        if (hours < 0.5 || drop < 2) null else (pct * hours / drop).roundToInt().takeIf { it in 1..240 }
+}
+
+/** Copies [text]; a group code is marked sensitive so Android hides it in the clipboard preview. */
+fun copyText(c: Context, label: String, text: String, sensitive: Boolean = false, done: String = "Copied") {
+    val clip = ClipData.newPlainText(label, text)
+    if (sensitive) clip.description.extras = PersistableBundle().apply {
+        putBoolean(if (Build.VERSION.SDK_INT >= 33) ClipDescription.EXTRA_IS_SENSITIVE else "android.content.extra.IS_SENSITIVE", true)
+    }
+    c.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    if (Build.VERSION.SDK_INT < 33) android.widget.Toast.makeText(c, done, android.widget.Toast.LENGTH_SHORT).show() // Android 13+ shows its own
 }
 
 /**
@@ -204,6 +267,9 @@ object Groups {
         val list = (listOf(g) + others(c).filter { it.code != g.code }).take(20)
         prefs(c).edit().putString("groups", JSONArray(list.map { JSONObject().put("name", it.name).put("code", it.code) }).toString()).apply()
     }
+    /** The group in use, then the others. */
+    fun all(c: Context): List<SavedGroup> = listOfNotNull(current(c)) + others(c)
+    fun find(c: Context, code: String?): SavedGroup? = code?.let { k -> all(c).firstOrNull { it.code == k } }
     /** First setup: saves the name and group. The mesh service starts afterwards. */
     fun setUp(c: Context, name: String, g: SavedGroup) {
         prefs(c).edit().putString("name", name).putString("code", g.code).putString("groupName", g.name).apply()
@@ -246,10 +312,19 @@ object Moderation {
     fun visible(c: Context, m: Message) = m.sender !in blocked(c) && m.id !in hidden(c)
 }
 
-/** Alerts for new group messages while DarkProof is not on screen. Made on the phone: no internet needed. */
+/**
+ * Alerts for new messages of every saved group. Made on the phone: no internet needed. While DarkProof is on screen,
+ * someone needing help, an "are you safe?" meant for me and other groups' messages show as a banner (with a vibration
+ * when it is urgent); otherwise as notifications, which open that group's chat.
+ */
 object Notifier {
     private const val MESSAGES = "messages"; private const val HELP = "help"
     @Volatile var onScreen = false
+    /** Set by the screen while it is shown: gets the banners. Main thread. */
+    var inApp: ((Alert) -> Unit)? = null
+
+    /** [group]: the saved group's code. [ask]: offer the one-tap "I'm safe" / "I need help" answers. */
+    data class Alert(val title: String, val body: String, val group: String?, val urgent: Boolean, val ask: Boolean, val messageId: String)
 
     fun setUp(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
@@ -258,27 +333,90 @@ object Notifier {
         MeshEngine.onIncoming = { m -> received(c.applicationContext, m) }
     }
 
-    private fun received(c: Context, m: Message) {
-        if (onScreen || !Moderation.visible(c, m)) return
-        if (c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= 33) return
-        val group = Groups.current(c)?.name ?: "your group"
-        val check = CheckIn.of(m.text)
-        val (title, body) = when (check) {
-            CheckIn.HELP -> "${m.name} needs help" to "Open DarkProof to see where they are."
-            CheckIn.SAFE -> "${m.name} is safe" to group
-            null -> "${m.name} · $group" to (if (m.photo != null) Photo.text(Photo.caption(m.text)) else m.text)
+    /** What a group message from someone else says, as an alert. */
+    fun alertFor(c: Context, m: Message): Alert {
+        val group = MeshEngine.groupName(m.group) ?: Groups.current(c)?.name ?: "your group"
+        val me = c.getSharedPreferences("mesh", 0).getString("name", "") ?: ""
+        val check = CheckIn.of(m.text); val vouch = Vouch.of(m.text); val ask = AreYouSafe.of(m.text)
+        fun details(needs: Set<Need>, people: Int?) = (needs.map { it.label } + listOfNotNull(people?.let { "$it people" })).joinToString(" · ")
+        return when {
+            check == CheckIn.HELP -> Alert("${m.name} needs help",
+                details(CheckIn.needs(m.text), CheckIn.people(m.text)).ifEmpty { "Open DarkProof to see where they are." } + " · $group", m.group, true, false, m.id)
+            vouch?.status == CheckIn.HELP -> Alert("${vouch.subject} needs help",
+                listOf(details(vouch.needs, vouch.people), "Reported by ${m.name} · $group").filter { it.isNotEmpty() }.joinToString(" · "), m.group, true, false, m.id)
+            ask != null && ask.isFor(me) -> Alert(if (ask.to == null) "${m.name} asks: is everyone safe?" else "${m.name} asks: are you safe?",
+                "Answer with one tap · $group", m.group, true, true, m.id)
+            check == CheckIn.SAFE -> Alert("${m.name} is safe", group, m.group, false, false, m.id)
+            vouch != null -> Alert("${vouch.subject} is safe", "Reported by ${m.name} · $group", m.group, false, false, m.id)
+            else -> Alert("${m.name} · $group", if (m.photo != null) Photo.text(Photo.caption(m.text)) else m.text, m.group, false, false, m.id)
         }
-        val open = PendingIntent.getActivity(c, 0, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = android.app.Notification.Builder(c, if (check == CheckIn.HELP) HELP else MESSAGES)
-            .setSmallIcon(R.drawable.ic_notifications).setContentTitle(title).setContentText(body)
-            .setStyle(android.app.Notification.BigTextStyle().bigText(body))
-            .setContentIntent(open).setAutoCancel(true).setGroup("group").build()
-        // Help alerts each get their own notification; the rest replace one per person.
-        val id = if (check == CheckIn.HELP) m.id.hashCode() else m.sender.hashCode()
-        c.getSystemService(NotificationManager::class.java).notify(id, n)
+    }
+
+    private fun received(c: Context, m: Message) {
+        if (!Moderation.visible(c, m)) return
+        val a = alertFor(c, m)
+        if (onScreen) {
+            val otherGroup = m.group != null && m.group != Groups.current(c)?.code
+            if (a.urgent || otherGroup) { inApp?.invoke(a); if (a.urgent) vibrate(c) }
+            return
+        }
+        if (c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= 33) return
+        // Help alerts and questions each get their own notification; the rest replace one per person.
+        val id = if (a.urgent) m.id.hashCode() else m.sender.hashCode()
+        val n = android.app.Notification.Builder(c, if (a.urgent) HELP else MESSAGES)
+            .setSmallIcon(R.drawable.ic_notifications).setContentTitle(a.title).setContentText(a.body)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(a.body))
+            .setContentIntent(open(c, id, m.group)).setAutoCancel(true).setGroup("group")
+        if (a.ask) {
+            n.addAction(android.app.Notification.Action.Builder(null, "I'm safe", PendingIntent.getBroadcast(c, id,
+                Intent(c, AnswerReceiver::class.java).putExtra(Actions.EXTRA_GROUP, m.group).putExtra(AnswerReceiver.NOTIFICATION, id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build())
+            n.addAction(android.app.Notification.Action.Builder(null, "I need help", PendingIntent.getActivity(c, id + 1,
+                Actions.intent(c, Actions.HELP, m.group).putExtra(AnswerReceiver.NOTIFICATION, id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build())
+        }
+        c.getSystemService(NotificationManager::class.java).notify(id, n.build())
+    }
+
+    /** Opens DarkProof on [group]'s chat. */
+    private fun open(c: Context, id: Int, group: String?) = PendingIntent.getActivity(c, id, Actions.intent(c, Actions.CHAT, group),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    @Suppress("DEPRECATION")
+    fun vibrate(c: Context) = runCatching {
+        val v = if (Build.VERSION.SDK_INT >= 31) c.getSystemService(android.os.VibratorManager::class.java).defaultVibrator
+                else c.getSystemService(android.os.Vibrator::class.java)
+        v?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 350, 150, 350), -1))
     }
 }
+
+/** When each saved group's chat was last read, so new messages show as unread (Chat tab, group switcher). */
+object ReadMarks {
+    private fun prefs(c: Context) = c.getSharedPreferences("read", 0)
+    fun lastRead(c: Context, code: String): Long = prefs(c).getLong(key(code), 0L)
+    fun markRead(c: Context, code: String, ts: Long) { if (ts > lastRead(c, code)) prefs(c).edit().putLong(key(code), ts).apply() }
+    /** Messages from others in [code] newer than the last read one. */
+    fun unread(c: Context, all: List<Message>, code: String): Int {
+        val since = lastRead(c, code)
+        return all.count { !it.public && it.group == code && it.ts > since && it.sender != MeshEngine.deviceId }
+    }
+    private fun key(code: String) = code.hashCode().toString() // not the code itself
+}
+
+/** "Today", "Yesterday", or the date in the phone's language, for the chat. */
+fun dayLabel(c: Context, ts: Long, now: Long = System.currentTimeMillis()): String = when {
+    android.text.format.DateUtils.isToday(ts) -> "Today"
+    android.text.format.DateUtils.isToday(ts + 86_400_000L) -> "Yesterday"
+    else -> {
+        val sameYear = java.util.Calendar.getInstance().apply { timeInMillis = ts }.get(java.util.Calendar.YEAR) ==
+            java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.YEAR)
+        android.text.format.DateUtils.formatDateTime(c, ts, android.text.format.DateUtils.FORMAT_SHOW_DATE or
+            android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or (if (sameYear) android.text.format.DateUtils.FORMAT_NO_YEAR else android.text.format.DateUtils.FORMAT_SHOW_YEAR))
+    }
+}
+
+/** The day a message was sent, for grouping the chat by day. */
+fun dayOf(ts: Long): Int = java.util.Calendar.getInstance().apply { timeInMillis = ts }.let { it.get(java.util.Calendar.YEAR) * 1000 + it.get(java.util.Calendar.DAY_OF_YEAR) }
 
 /** Formats a day or time for the chat. */
 fun fullTime(ts: Long): String = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ts))

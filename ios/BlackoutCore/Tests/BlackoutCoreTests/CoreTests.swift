@@ -83,4 +83,90 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(id.count, 16); XCTAssertTrue(id.allSatisfy { $0.isHexDigit && !$0.isUppercase })
         XCTAssertNotEqual(id, Packet.newId())
     }
+    // MARK: spec "Forwarding rules": timestamps and ttl (same vectors as Android's CoreTest)
+
+    func testPacketsFromTheFutureAreDropped() {
+        let t: Int64 = 1_800_000_000_000
+        var got: [String] = []
+        let r = MeshRouter(send: { _, _ in }, deliver: { got.append($0.id) }, now: { t })
+        r.receive(from: "p", Packet(id: "00000000000000c1", ts: t + MeshRouter.maxFutureMs + 1, ttl: 16, cipher: Data([1])))
+        r.receive(from: "p", Packet(id: "00000000000000c2", ts: t + MeshRouter.maxFutureMs, ttl: 16, cipher: Data([1])))
+        XCTAssertEqual(got, ["00000000000000c2"])
+        var sent: [String] = []
+        let r2 = MeshRouter(send: { _, p in sent.append(p.id) }, deliver: { _ in }, now: { t })
+        r2.restore([Packet(id: "00000000000000c3", ts: t + 3_600_000, ttl: 16, cipher: Data([1])),
+                    Packet(id: "00000000000000c4", ts: t, ttl: 16, cipher: Data([1]))])
+        r2.peerUp("x")
+        XCTAssertEqual(sent, ["00000000000000c4"]) // the forged future packet is not kept
+    }
+
+    func testTtlAbove16IsLowered() {
+        var delivered: [Int] = [], forwarded: [Int] = []
+        let r = MeshRouter(send: { _, p in forwarded.append(p.ttl) }, deliver: { delivered.append($0.ttl) })
+        r.peerUp("a"); r.peerUp("b")
+        r.receive(from: "a", Packet(id: "00000000000000d1", ts: now(), ttl: 64, cipher: Data([1])))
+        XCTAssertEqual(delivered, [16]) // stored with 16
+        XCTAssertEqual(forwarded, [15]) // and passed on with 15
+        var sent: [Int] = []
+        let r2 = MeshRouter(send: { _, p in sent.append(p.ttl) }, deliver: { _ in })
+        r2.restore([Packet(id: "00000000000000d2", ts: now(), ttl: 40, cipher: Data([1]))]); r2.peerUp("x")
+        XCTAssertEqual(sent, [15])
+    }
+
+    func testRestoreSendsNewPacketsToPeersAlreadyLinked() {
+        var sent: [String] = []
+        let r = MeshRouter(send: { _, p in sent.append(p.id) }, deliver: { _ in })
+        r.peerUp("x")
+        r.restore([Packet(id: "00000000000000e1", ts: now(), ttl: 16, cipher: Data([1]))])
+        XCTAssertEqual(sent, ["00000000000000e1"])
+    }
+
+    func testRestoredSeenIdsAreNotDeliveredAgain() {
+        var got: [String] = []
+        let r = MeshRouter(send: { _, _ in }, deliver: { got.append($0.id) })
+        r.restore([], seenIds: [m1])
+        r.receive(from: "peer", pkt(m1))
+        XCTAssertEqual(got, [])
+        r.receive(from: "peer", pkt("00000000000000b2"))
+        XCTAssertEqual(got, ["00000000000000b2"])
+    }
+
+    // MARK: spec "Storage": the store cap
+
+    func testStoreCapDropsUnreadableThenPublicThenGroup() {
+        let e = [StoreCap.Entry(id: "g1", ts: 1, size: 100, kind: .group), StoreCap.Entry(id: "p1", ts: 2, size: 100, kind: .isPublic),
+                 StoreCap.Entry(id: "u2", ts: 5, size: 100, kind: .unreadable), StoreCap.Entry(id: "u1", ts: 3, size: 100, kind: .unreadable),
+                 StoreCap.Entry(id: "p2", ts: 4, size: 100, kind: .isPublic), StoreCap.Entry(id: "g2", ts: 6, size: 100, kind: .group)]
+        XCTAssertEqual(StoreCap.overflow(e, maxBytes: 600, maxCount: 6), [])
+        XCTAssertEqual(StoreCap.overflow(e, maxBytes: 300, maxCount: 6), ["u1", "u2", "p1"])
+        XCTAssertEqual(StoreCap.overflow(e, maxBytes: 10_000, maxCount: 1), ["u1", "u2", "p1", "p2", "g1"])
+        XCTAssertEqual(StoreCap.overflow(e, maxBytes: 550, maxCount: 6), ["u1"])
+    }
+
+    // MARK: spec "Wi-Fi networks": duplicate links
+
+    func testDuplicateLinkRuleIsTheSameOnBothPhones() {
+        let a = "259b6c4d-e98", b = "7c0d995b-2c4" // a < b
+        // Both dialed at about the same time: both keep the link a dialed.
+        XCTAssertFalse(DuplicateLinks.keepNew(myId: a, remoteId: b, newDialedByMe: false, oldDialedByMe: true, oldAgeMs: 500))
+        XCTAssertTrue(DuplicateLinks.keepNew(myId: b, remoteId: a, newDialedByMe: false, oldDialedByMe: true, oldAgeMs: 500))
+        XCTAssertTrue(DuplicateLinks.keepNew(myId: a, remoteId: b, newDialedByMe: true, oldDialedByMe: false, oldAgeMs: 500))
+        XCTAssertFalse(DuplicateLinks.keepNew(myId: b, remoteId: a, newDialedByMe: true, oldDialedByMe: false, oldAgeMs: 500))
+        // The same phone dialed again (a restart), or the old link is older: the new one replaces it.
+        XCTAssertTrue(DuplicateLinks.keepNew(myId: a, remoteId: b, newDialedByMe: false, oldDialedByMe: false, oldAgeMs: 500))
+        XCTAssertTrue(DuplicateLinks.keepNew(myId: a, remoteId: b, newDialedByMe: false, oldDialedByMe: true, oldAgeMs: 10_000))
+    }
+
+    func testRecentIdsForgetTheOldest() {
+        var r = RecentIds(max: 3, ["a", "b"])
+        XCTAssertTrue(r.add("c")); XCTAssertFalse(r.add("a")); XCTAssertTrue(r.add("d"))
+        XCTAssertEqual(r.list, ["b", "c", "d"]); XCTAssertFalse(r.contains("a"))
+    }
+
+    func testReceiptsWaitForAQuietMomentButNotLong() {
+        XCTAssertFalse(ReceiptBatch.due(firstMs: 0, lastMs: 0, nowMs: 1_999))
+        XCTAssertTrue(ReceiptBatch.due(firstMs: 0, lastMs: 0, nowMs: 2_000))
+        XCTAssertFalse(ReceiptBatch.due(firstMs: 0, lastMs: 9_000, nowMs: 9_999)) // still arriving
+        XCTAssertTrue(ReceiptBatch.due(firstMs: 0, lastMs: 9_500, nowMs: 10_000)) // but at most 10 s
+    }
 }

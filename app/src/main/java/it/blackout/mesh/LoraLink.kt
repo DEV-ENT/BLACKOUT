@@ -31,34 +31,49 @@ class LoraLink(private val ctx: Context) {
     private var busy = false
     private var draining = false
     private var nonce = 0L
+    private var addr: String? = null // the radio being set up or linked; saved only once setup succeeds
+    private var pumping = false
     @Volatile var connected = false; private set
     @Volatile var status = "LoRa: no radio"; private set
 
     private fun set(s: String) { status = "LoRa: $s"; MeshEngine.notifyUi() }
     fun offer(p: Packet) = queue.offer(p)
-    fun start() { if (prefs.getString("radio", null) != null) connect(); pump() }
-    fun select(addr: String) { prefs.edit().putString("radio", addr).apply(); close(); connect() }
+    /** A radio was set up here before: it is linked again whenever it is in reach. */
+    val paired get() = prefs.getString("radio", null) != null
+    fun start() { prefs.getString("radio", null)?.let(::connect) }
+    fun select(a: String) { close(); connect(a) }
+    /** "Forget radio": no more linking to it. */
+    fun forget() { prefs.edit().remove("radio").apply(); addr = null; close(); set("no radio") }
 
     fun scan(found: (addr: String, name: String) -> Unit) {
-        val s = adapter?.bluetoothLeScanner ?: run { set("Bluetooth is off"); return }
+        val s = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner ?: run { set("Bluetooth is off"); return }
         val cb = object : ScanCallback() {
-            override fun onScanResult(t: Int, r: ScanResult) { h.post { found(r.device.address, r.device.name ?: r.device.address) } }
+            override fun onScanResult(t: Int, r: ScanResult) { h.post { found(r.device.address, r.device.name ?: "Unnamed radio") } }
         }
-        s.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()), ScanSettings.Builder().build(), cb)
-        h.postDelayed({ s.stopScan(cb) }, 15_000)
+        try { s.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()), ScanSettings.Builder().build(), cb) }
+        catch (e: RuntimeException) { set("can't search right now"); return }
+        h.postDelayed({ runCatching { s.stopScan(cb) } }, 15_000)
     }
-    private fun connect() {
-        val addr = prefs.getString("radio", null) ?: return
-        val a = adapter ?: return
+    private fun connect(a: String) {
+        val ad = adapter ?: return
+        addr = a
         set("connecting…")
-        gatt = a.getRemoteDevice(addr).connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE)
+        gatt = try { ad.getRemoteDevice(a).connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) } catch (e: RuntimeException) { set("can't connect"); null }
+        if (!pumping) { pumping = true; h.postDelayed(::pump, 1_000) }
     }
     private fun close() {
         if (connected) MeshEngine.router?.peerDown(PEER)
         connected = false; ops.clear(); busy = false; draining = false
         gatt?.close(); gatt = null; toRadio = null; fromRadio = null
     }
-    private fun retry(why: String) { close(); set("$why, retrying"); h.postDelayed({ if (gatt == null) connect() }, 10_000) }
+    /** A paired radio is tried again every 10 s; a new one that failed is left alone (it wasn't saved). */
+    private fun retry(why: String) {
+        close(); val a = addr
+        if (a != null && a == prefs.getString("radio", null)) { set("$why, retrying"); h.postDelayed({ if (gatt == null && addr == a) connect(a) }, 10_000) }
+        else set(why)
+    }
+    /** Not a radio DarkProof can use: no retrying. */
+    private fun fail(why: String) { close(); set(why) }
 
     private fun enqueue(op: () -> Boolean) { ops.addLast(op); runNext() }
     private fun runNext() {
@@ -86,12 +101,15 @@ class LoraLink(private val ctx: Context) {
         val m = Meshtastic.parseFromRadio(v)
         if (m.configComplete == nonce && !connected) {
             connected = true; set("radio connected")
+            addr?.let { prefs.edit().putString("radio", it).apply() } // set up: from now on it is the paired radio
             Thread { MeshEngine.router?.peerUp(PEER); MeshEngine.notifyUi() }.start()
         }
         m.payload?.let { raw -> Packet.decode(raw)?.let { p -> Thread { MeshEngine.router?.receive(PEER, p) }.start() } }
         drain()
     }
+    /** Runs only while a radio is being set up, linked or paired, so a phone without one doesn't wake every second. */
     private fun pump() {
+        if (gatt == null && !paired) { pumping = false; return }
         if (connected) queue.next()?.let { p -> write(Meshtastic.toRadioPacket(p.encode(), rnd.nextInt().toLong() and 0xFFFFFFFFL)) }
         h.postDelayed(::pump, 1_000)
     }
@@ -109,7 +127,7 @@ class LoraLink(private val ctx: Context) {
             val num = s?.getCharacteristic(FROM_NUM)
             toRadio = s?.getCharacteristic(TO_RADIO); fromRadio = s?.getCharacteristic(FROM_RADIO)
             val d = num?.getDescriptor(CCCD)
-            if (st != BluetoothGatt.GATT_SUCCESS || num == null || d == null || toRadio == null || fromRadio == null) { retry("not a Meshtastic device"); return@post }
+            if (st != BluetoothGatt.GATT_SUCCESS || num == null || d == null || toRadio == null || fromRadio == null) { fail("not a Meshtastic radio"); return@post }
             g.setCharacteristicNotification(num, true)
             enqueue { d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE; g.writeDescriptor(d) }
             nonce = (rnd.nextInt(1_000_000_000) + 1).toLong()

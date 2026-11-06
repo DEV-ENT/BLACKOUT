@@ -9,14 +9,6 @@ extension CheckIn {
 }
 
 extension Engine {
-    /// Sends a check-in to the group with this phone's battery level and, if you share it, your position (a fresh
-    /// GPS fix can take a few seconds). The haptic comes right away.
-    func checkIn(_ c: CheckIn) {
-        UINotificationFeedbackGenerator().notificationOccurred(c == .safe ? .success : .warning)
-        let battery = Self.batteryPercent
-        LocationService.shared.forCheckIn { [weak self] spot in self?.send(c.text(battery: battery, spot: spot)) }
-    }
-
     /// This phone's battery level, or nil when unknown (the Simulator has none).
     static var batteryPercent: Int? {
         #if DEBUG
@@ -33,17 +25,6 @@ extension Engine {
     }
 }
 
-extension View {
-    /// Asks before telling the group you need help.
-    func helpConfirmation(_ shown: Binding<Bool>, groupName: String, send: @escaping () -> Void) -> some View {
-        confirmationDialog("Tell \(groupName) you need help?", isPresented: shown, titleVisibility: .visible) {
-            Button("Send “I need help”", role: .destructive, action: send)
-        } message: {
-            Text("Then write in Chat what you need and where you are.")
-        }
-    }
-}
-
 /// "just now", "5 min ago", "2 h ago", "3 d ago".
 func ago(_ ts: Int64, _ now: Date) -> String {
     let s = max(0, Int(now.timeIntervalSince1970 - Double(ts) / 1000))
@@ -55,40 +36,12 @@ func ago(_ ts: Int64, _ now: Date) -> String {
     }
 }
 
-/// Groups this phone has been in, so random codes are never lost when switching. Stored only on this phone.
-enum SavedGroups {
-    struct Entry: Codable, Identifiable, Hashable { var name: String; var code: String; var id: String { code } }
-    private static let key = "savedGroups"
-
-    static func all() -> [Entry] {
-        guard let d = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([Entry].self, from: d)) ?? []
-    }
-
-    static func remember(_ e: Entry) {
-        let list = [e] + all().filter { $0.code != e.code }
-        UserDefaults.standard.set(try? JSONEncoder().encode(Array(list.prefix(10))), forKey: key)
-    }
-
-    /// Makes [code] this phone's group: keeps the old one in the list, saves the new one, and re-reads the messages.
-    static func switchTo(groupName: String, code: String, engine: Engine) {
-        let d = UserDefaults.standard
-        if let old = d.string(forKey: "code"), !old.isEmpty, old != code {
-            remember(Entry(name: d.string(forKey: "groupName") ?? "My group", code: old))
-        }
-        remember(Entry(name: groupName, code: code))
-        d.set(code, forKey: "code"); d.set(groupName, forKey: "groupName")
-        engine.rejoin(name: engine.name, code: code)
-    }
-}
-
 // MARK: - People tab
 
 struct PeopleView: View {
     @ObservedObject var engine: Engine
-    let open: (MainView.Sheet) -> Void
+    @ObservedObject private var nav = Nav.shared
     @AppStorage("groupName") private var groupName = "My group"
-    @State private var confirmHelp = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { t in
@@ -100,43 +53,57 @@ struct PeopleView: View {
                         ScreenTitle(title: "People", subtitle: people.isEmpty ? groupName :
                             "\(groupName) · \(people.count) \(people.count == 1 ? "person" : "people") · \(nearby) nearby")
                         Spacer()
-                        Button { open(.group) } label: { RoundIcon(symbol: "gearshape.fill") }.accessibilityLabel("Group settings")
+                        Button { nav.sheet = .settings } label: { RoundIcon(symbol: "gearshape.fill") }.accessibilityLabel("Settings")
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 12) {
-                            BigCheckIn(checkIn: .safe) { engine.checkIn(.safe) }
-                            BigCheckIn(checkIn: .help) { confirmHelp = true }
+                            BigCheckIn(checkIn: .safe, sending: engine.checkInSending == .safe) {
+                                let e = engine
+                                e.checkIn(.safe) { nav.toast(e.queuedToast("“I'm safe”")) }
+                            }
+                            BigCheckIn(checkIn: .help, sending: engine.checkInSending == .help) { nav.sheet = .help }
                         }
+                        .disabled(engine.checkInSending != nil)
                         LastCheckIn(engine: engine, now: t.date).padding(.horizontal, 4)
                     }
-                    if engine.phones == 0 { ConnectionHelp(engine: engine) }
+                    SetupProblemCard(engine: engine)
+                    if engine.reach == .none && engine.setupProblem == nil { ConnectionHelp(engine: engine) }
                     if people.isEmpty {
-                        NoPeopleCard(groupName: groupName) { open(.invite) }
+                        NoPeopleCard(groupName: groupName) { nav.sheet = .invite }
                     } else {
                         PeopleList(people: people, engine: engine, now: t.date)
-                        Button { open(.invite) } label: { Label("Invite friends", systemImage: "qrcode") }
+                    }
+                    VStack(spacing: 10) {
+                        Button { nav.sheet = .askSafe } label: { Label("Ask “Are you safe?”", systemImage: "questionmark.bubble.fill") }
                             .buttonStyle(SecondaryButton())
+                        Button { nav.sheet = .vouch } label: { Label("Check in for someone", systemImage: "person.crop.circle.badge.checkmark") }
+                            .buttonStyle(SecondaryButton())
+                        if !people.isEmpty {
+                            Button { nav.sheet = .invite } label: { Label("Invite friends", systemImage: "qrcode") }
+                                .buttonStyle(SecondaryButton())
+                        }
                     }
                 }
                 .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
             }
             .background(Theme.bg.ignoresSafeArea())
         }
-        .helpConfirmation($confirmHelp, groupName: groupName) { engine.checkIn(.help) }
     }
 }
 
 /// Big green "I'm safe" or red "I need help" tile, in the logo's shape.
 struct BigCheckIn: View {
     let checkIn: CheckIn
+    var sending = false
     let action: () -> Void
 
     var body: some View {
         let safe = checkIn == .safe
         Button(action: action) {
             VStack(alignment: .leading, spacing: 18) {
-                Image(systemName: safe ? "checkmark.shield.fill" : "sos").font(.system(size: 30, weight: .bold))
-                Text(safe ? "I'm safe" : "I need help").font(.system(size: 21, weight: .heavy))
+                Image(systemName: safe ? "checkmark.shield.fill" : "sos").scaledFont(30, .bold)
+                Text(sending ? "Sending…" : safe ? "I'm safe" : "I need help").scaledFont(21, .heavy)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(safe ? Color.black : .white)
             .frame(maxWidth: .infinity, minHeight: 132, alignment: .bottomLeading).padding(18)
@@ -144,6 +111,7 @@ struct BigCheckIn: View {
             .contentShape(VaultShape(cut: 28, radius: 32, small: 6))
         }
         .buttonStyle(PressScale())
+        .accessibilityLabel(sending ? "Sending" : safe ? "I'm safe" : "I need help")
         .accessibilityHint(safe ? "Tells your group you're safe" : "Asks your group for help")
     }
 }
@@ -154,10 +122,12 @@ struct LastCheckIn: View {
     let now: Date
 
     var body: some View {
-        if let m = engine.myLastCheckIn, let c = CheckIn.of(m.text) {
-            Text("Your last check-in: \(c.label.lowercased()), \(ago(m.ts, now)).").font(.system(size: 14)).foregroundStyle(Theme.dim)
+        if engine.checkInSending != nil {
+            Text("Getting your position, then sending…").scaledFont(14, .semibold).foregroundStyle(Theme.text)
+        } else if let m = engine.myLastCheckIn, let c = CheckIn.of(m.text) {
+            Text("Your last check-in: \(c.label.lowercased()), \(ago(m.ts, now)).").scaledFont(14).foregroundStyle(Theme.dim)
         } else {
-            Text("One tap tells your group how you are.").font(.system(size: 14)).foregroundStyle(Theme.dim)
+            Text("One tap tells your group how you are.").scaledFont(14).foregroundStyle(Theme.dim)
         }
     }
 }
@@ -169,9 +139,9 @@ struct NoPeopleCard: View {
 
     var body: some View {
         Card {
-            Text("No one from \(groupName) yet").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+            Text("No one from \(groupName) yet").scaledFont(20, .bold).foregroundStyle(Theme.text)
             Text("Invite friends with a QR code, then keep DarkProof open near each other. People show up here once they write.")
-                .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                .scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             Button(action: invite) { Label("Invite friends", systemImage: "qrcode") }.buttonStyle(PrimaryButton())
         }
     }
@@ -187,7 +157,7 @@ struct PeopleList: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(people) { p in
-                PersonRow(person: p, inRange: engine.linkedNodes.contains(p.id), now: now) { finding = p }
+                PersonRow(person: p, inRange: engine.linkedNodes.contains(p.id), byMe: p.reporterId == engine.deviceId, now: now) { finding = p }
                 if p.id != people.last?.id { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 76) }
             }
         }
@@ -199,19 +169,39 @@ struct PeopleList: View {
 struct PersonRow: View {
     let person: Person
     let inRange: Bool
+    var byMe = false
     let now: Date
     var find: () -> Void = {} // opens the compass, for people who shared their position
 
+    private var status: (String, Color) {
+        guard let c = person.checkIn else { return ("Last heard \(ago(person.lastTs, now))", Theme.dim) }
+        if person.isReport {
+            let by = byMe ? "by you" : "by \(person.reportedBy ?? "someone")"
+            return ("\(c.label) (reported \(by)) · \(ago(person.checkInTs, now))", c.color)
+        }
+        return ("\(c.label) · \(ago(person.checkInTs, now))", c.color)
+    }
+
     var body: some View {
-        let status: (String, Color) = person.checkIn.map { ("\($0.label) · \(ago(person.checkInTs, now))", $0.color) }
-            ?? ("Last heard \(ago(person.lastTs, now))", Theme.dim)
+        let s = status
+        let extra = needsText(person.checkIn == .help ? person.needs : [], people: person.people)
         HStack(spacing: 14) {
-            Text(String(person.name.prefix(1)).uppercased()).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
-                .frame(width: 46, height: 46).background(Circle().fill(Theme.tile))
-                .overlay(Circle().stroke(person.checkIn?.color ?? .clear, lineWidth: 2.5).padding(-3))
+            Group {
+                if person.isReport {
+                    Image(systemName: "person.fill").scaledFont(18, .bold).foregroundStyle(Theme.dim)
+                        .frame(width: 46, height: 46).background(Circle().fill(Theme.tile))
+                        .overlay(Circle().stroke(person.checkIn?.color ?? .clear, style: StrokeStyle(lineWidth: 2, dash: [4, 3])).padding(-3))
+                } else {
+                    Text(String(person.name.prefix(1)).uppercased()).scaledFont(18, .bold).foregroundStyle(Theme.text)
+                        .frame(width: 46, height: 46).background(Circle().fill(Theme.tile))
+                        .overlay(Circle().stroke(person.checkIn?.color ?? .clear, lineWidth: 2.5).padding(-3))
+                }
+            }
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(person.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text(status.0).font(.system(size: 14, weight: .medium)).foregroundStyle(status.1)
+                Text(person.name).scaledFont(17, .semibold).foregroundStyle(Theme.text).lineLimit(1)
+                Text(s.0).scaledFont(14, .medium).foregroundStyle(s.1).fixedSize(horizontal: false, vertical: true)
+                if !extra.isEmpty { Text(extra).scaledFont(14, .semibold).foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
@@ -242,7 +232,7 @@ struct BatteryLabel: View {
                     percent <= 60 ? "battery.50percent" : percent <= 85 ? "battery.75percent" : "battery.100percent")
             Text("\(percent)%")
         }
-        .font(.system(size: 13, weight: .semibold))
+        .scaledFont(13, .semibold)
         .foregroundStyle(low ? Theme.help : Theme.dim)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Battery \(percent) percent")
@@ -251,105 +241,39 @@ struct BatteryLabel: View {
 
 // MARK: - Connection help
 
-/// Shown while no phone is in range: what to check, with live Bluetooth state.
+/// Shown while nothing carries messages yet (no phone, relay or radio): what to check.
 struct ConnectionHelp: View {
     @ObservedObject var engine: Engine
 
-    private var bluetoothProblem: String? {
-        let s = engine.status["2-ble"] ?? ""
-        if s.contains("Bluetooth is off") { return "Bluetooth is off. Turn it on in Control Center." }
-        if s.contains("not allowed") { return "DarkProof may not use Bluetooth. Allow it in Settings." }
-        if s.contains("not available") { return "This device has no Bluetooth." }
-        return nil
-    }
-
     var body: some View {
         Card {
-            Text("No one in range yet").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
-            tip(bluetoothProblem == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                bluetoothProblem == nil ? Theme.safe : Theme.help,
-                bluetoothProblem ?? "Bluetooth is on.")
-            tip("iphone.radiowaves.left.and.right", Theme.text,
+            Text("No one in range yet").scaledFont(20, .bold).foregroundStyle(Theme.text)
+            tip("iphone.radiowaves.left.and.right",
                 "Open DarkProof on both phones and stay within about 10–50 m. Walls cut the range: try outside or by a window.")
-            tip("wifi", Theme.text, "If asked, allow Local Network: iPhones also connect over Wi-Fi, with no internet.")
-            tip("point.3.connected.trianglepath.dotted", Theme.text,
+            tip("wifi", "On the same Wi-Fi or hotspot, phones also connect with no internet.")
+            tip("point.3.connected.trianglepath.dotted",
                 "Farther away? Messages hop through any phone with DarkProof in between. For kilometers, pair a LoRa radio.")
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-            }
-            .buttonStyle(GhostButton())
         }
     }
 
-    private func tip(_ icon: String, _ color: Color, _ text: String) -> some View {
+    private func tip(_ icon: String, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: icon).foregroundStyle(color).frame(width: 22)
-            Text(text).font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            Image(systemName: icon).foregroundStyle(Theme.text).frame(width: 22).accessibilityHidden(true)
+            Text(text).scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-// MARK: - Invite
-
-struct InviteSheet: View {
-    let groupName: String
-    let code: String
-    @State private var showCode = false
-    private var url: URL { Invite.url(name: groupName, code: code) }
-
-    var body: some View {
-        SheetPage(title: "Invite") {
-            VStack(spacing: 20) {
-                VStack(spacing: 6) {
-                    Text("Invite to \(groupName)").font(.system(size: 28, weight: .heavy)).foregroundStyle(Theme.text)
-                        .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6)
-                    Text("Your friend points their iPhone Camera at this code, then taps the DarkProof link.")
-                        .font(.system(size: 15)).foregroundStyle(Theme.dim).multilineTextAlignment(.center)
-                }
-                if let qr = Invite.qr(url) {
-                    Image(uiImage: qr).interpolation(.none).resizable().scaledToFit()
-                        .padding(20)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                        .frame(maxWidth: 280)
-                        .accessibilityLabel("Invite QR code")
-                }
-                ShareLink(item: url, subject: Text("Join \(groupName) on DarkProof"),
-                          message: Text("Join my group \(groupName) on DarkProof. Group code: \(code)")) {
-                    Label("Send invite", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(PrimaryButton())
-                Text("AirDrop works without internet.").font(.footnote).foregroundStyle(Theme.dim)
-            }
-            .frame(maxWidth: .infinity)
-            Card {
-                Text("Or tell them the code").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                if showCode {
-                    Text(code).font(.system(size: 22, weight: .bold, design: .monospaced)).foregroundStyle(Theme.text)
-                        .textSelection(.enabled)
-                    Button("Copy code") { UIPasteboard.general.string = code }.buttonStyle(GhostButton())
-                } else {
-                    Button("Show code") { showCode = true }.buttonStyle(GhostButton())
-                }
-                Label("Anyone with this QR or code can read the group. Share it only with people you trust.", systemImage: "lock.fill")
-                    .font(.footnote).foregroundStyle(Theme.dim)
-            }
-        }
-    }
-}
-
-// MARK: - Group settings
+// MARK: - Settings
 
 struct GroupSheet: View {
     @ObservedObject var engine: Engine
-    let created: () -> Void
     @Environment(\.dismiss) private var dismiss
     @AppStorage("groupName") private var groupName = "My group"
     @AppStorage("code") private var code = ""
     @AppStorage("name") private var myName = ""
     @State private var nameDraft = ""
     @State private var groupDraft = ""
-    @State private var joinCode = ""
-    @State private var saved: [SavedGroups.Entry] = []
     @State private var blocked: [String: String] = [:]
     @AppStorage(LocationService.shareKey) private var shareLocation = false
     @ObservedObject private var loc = LocationService.shared
@@ -359,18 +283,20 @@ struct GroupSheet: View {
         SheetPage(title: "Settings") {
             Card {
                 InputField(label: "Your name", hint: "Shown next to your messages.") {
-                    TextField("", text: $nameDraft)
+                    TextField("", text: $nameDraft).submitLabel(.done)
                 }
                 InputField(label: "Group name", hint: "Only on this phone. Each person can name it as they like.") {
-                    TextField("", text: $groupDraft)
+                    TextField("", text: $groupDraft, prompt: Text(groupName).foregroundColor(Theme.faint)).submitLabel(.done)
                 }
                 Button("Save") { save() }
                     .buttonStyle(PrimaryButton())
-                    .disabled(clean(nameDraft, 20).isEmpty || clean(groupDraft, Invite.maxGroupName).isEmpty)
+                    .disabled(clean(nameDraft, 20).isEmpty)
             }
+            Card { FingerprintView(code: code) }
+            GroupsCard(engine: engine)
             Card {
                 HStack {
-                    Text("Notifications").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                    Text("Notifications").scaledFont(17, .bold).foregroundStyle(Theme.text)
                     Spacer()
                     switch notifier.status {
                     case .authorized, .provisional, .ephemeral: Chip("On", Theme.safe)
@@ -378,107 +304,80 @@ struct GroupSheet: View {
                     default: EmptyView()
                     }
                 }
-                Text("Alerts when your group writes or checks in, even when DarkProof is in the background. Someone asking for help always gets an alert of their own. Made on your phone: no internet needed.")
-                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                Text("Alerts when your groups write or check in, and always when someone needs help. In the background iOS keeps only Bluetooth running, so alerts then come from phones nearby. Made on your phone: no internet needed.")
+                    .scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 if notifier.status == .notDetermined {
                     Button("Turn on notifications") { notifier.requestPermission() }.buttonStyle(GhostButton())
                 } else if notifier.status == .denied {
-                    Button("Open Settings") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                    }
-                    .buttonStyle(GhostButton())
+                    OpenSettingsButton()
                 }
             }
             .onAppear { notifier.refresh() }
             Card {
                 Toggle(isOn: $shareLocation) {
-                    Text("Share my location in check-ins").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                    Text("Share my location in check-ins").scaledFont(17, .bold).foregroundStyle(Theme.text)
                 }
                 .tint(Theme.safe)
-                Text("When you tap I'm safe or I need help, your group also sees where you are, and can find you with a compass. It works without internet. Only your group can read it.")
-                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                Text("When you tap I'm safe or I need help, your group also sees where you are, and can find you with a compass. It works without internet. Only your group can read your check-ins.")
+                    .scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 if shareLocation && loc.denied {
                     Text("Location is off for DarkProof. Allow it in Settings, or your check-ins go out without it.")
                         .font(.footnote).foregroundStyle(Theme.help)
-                    Button("Open Settings") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                    }
-                    .buttonStyle(GhostButton())
+                    OpenSettingsButton()
                 }
             }
             .onChange(of: shareLocation) { on in if on { LocationService.shared.requestPermission() } }
             Card {
-                Text("Your other groups").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                let others = saved.filter { $0.code != code }
-                if others.isEmpty {
-                    Text("Groups you switch away from are kept here, so you can come back.")
-                        .font(.system(size: 15)).foregroundStyle(Theme.dim)
+                Text("Practice and shortcuts").scaledFont(17, .bold).foregroundStyle(Theme.text)
+                HStack(spacing: 10) {
+                    Button("Practice asking for help") { open(.practice) }.buttonStyle(GhostButton())
+                    Button("Shortcut") { open(.shortcut) }.buttonStyle(GhostButton())
                 }
-                ForEach(others) { g in
-                    HStack {
-                        Text(g.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
-                        Spacer()
-                        Button("Switch") { switchTo(g.name, g.code) }.buttonStyle(GhostButton())
-                    }
-                }
+                Button("Show the Get ready list") { UserDefaults.standard.set(false, forKey: "hideGetReady"); Nav.shared.toast("It's on Home") }
+                    .buttonStyle(GhostButton())
             }
             if !blocked.isEmpty {
                 Card {
-                    Text("Blocked people").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                    Text("Their messages, places and check-ins are hidden on this phone.").font(.system(size: 15)).foregroundStyle(Theme.dim)
+                    Text("Blocked people").scaledFont(17, .bold).foregroundStyle(Theme.text)
+                    Text("Their messages, places and check-ins are hidden on this phone.").scaledFont(15).foregroundStyle(Theme.dim)
                     ForEach(blocked.sorted(by: { $0.value < $1.value }), id: \.key) { id, name in
                         HStack {
-                            Text(name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
+                            Text(name).scaledFont(17, .semibold).foregroundStyle(Theme.text)
                             Spacer()
                             Button("Unblock") { Moderation.unblock(id); blocked = Moderation.blocked; engine.moderationChanged() }
-                                .buttonStyle(GhostButton())
+                                .buttonStyle(GhostButton()).accessibilityLabel("Unblock \(name)")
                         }
                     }
                 }
             }
             Card {
-                Text("Help and safety").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                Text("Help and safety").scaledFont(17, .bold).foregroundStyle(Theme.text)
                 Text("In Everyone, hold a message to report it or block its sender. To report abuse or a problem, write to \(Contact.email).")
-                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                    .scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
                     Button("Email us") { UIApplication.shared.open(Contact.mail) }.buttonStyle(GhostButton())
                     Button("Privacy policy") { UIApplication.shared.open(Contact.privacy) }.buttonStyle(GhostButton())
                 }
             }
-            Card {
-                Text("Join or start another group").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
-                InputField(label: "Group code", hint: "Easier: point the iPhone Camera at a friend's invite QR.") {
-                    TextField("", text: $joinCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                }
-                HStack(spacing: 10) {
-                    Button("Join with code") { switchTo("Group", clean(joinCode, 200)) }
-                        .buttonStyle(GhostButton()).disabled(clean(joinCode, 200).count < 8)
-                    Button("Create a new group") {
-                        switchTo("\(myName)'s group".prefix(Invite.maxGroupName).description, Invite.newCode())
-                        created()
-                    }
-                    .buttonStyle(GhostButton())
-                }
-                Text("Switching shows the other group's messages. This group's messages stay on the phone.")
-                    .font(.footnote).foregroundStyle(Theme.dim)
-            }
         }
-        .onAppear { nameDraft = myName; groupDraft = groupName; saved = SavedGroups.all(); blocked = Moderation.blocked }
+        .onAppear { nameDraft = myName; groupDraft = groupName; blocked = Moderation.blocked }
     }
 
     private func clean(_ s: String, _ max: Int) -> String {
         String(s.trimmingCharacters(in: .whitespacesAndNewlines).prefix(max))
     }
 
-    private func save() {
-        let n = clean(nameDraft, 20), g = clean(groupDraft, Invite.maxGroupName)
-        if g != groupName { groupName = g; SavedGroups.remember(.init(name: g, code: code)) }
-        if n != myName { myName = n; engine.rejoin(name: n, code: code) }
-        dismiss()
+    private func open(_ s: MainView.Sheet) {
+        Nav.shared.sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { Nav.shared.sheet = s }
     }
 
-    private func switchTo(_ name: String, _ newCode: String) {
-        SavedGroups.switchTo(groupName: name, code: newCode, engine: engine)
+    private func save() {
+        let n = clean(nameDraft, 20), typed = clean(groupDraft, Invite.maxGroupName)
+        let g = typed.isEmpty ? groupName : typed
+        if g != groupName { groupName = g; SavedGroups.remember(.init(name: g, code: code)) }
+        if n != myName { myName = n; engine.rejoin(name: n, code: code) }
+        Nav.shared.toast("Saved")
         dismiss()
     }
 }

@@ -71,7 +71,7 @@ object Schnorr {
         val px = int(pub); if (px >= P) return false
         val c = px.pow(3).add(SEVEN).mod(P)
         val y = c.modPow(P.add(BigInteger.ONE).shiftRight(2), P)
-        if (y.modPow(BigInteger.TWO, P) != c) return false
+        if (y.modPow(BigInteger.valueOf(2), P) != c) return false // not BigInteger.TWO: that needs Android 13
         val point = Point(px, if (y.testBit(0)) P.subtract(y) else y)
         val r = int(sig.copyOfRange(0, 32)); val s = int(sig.copyOfRange(32, 64))
         if (r >= P || s >= N) return false

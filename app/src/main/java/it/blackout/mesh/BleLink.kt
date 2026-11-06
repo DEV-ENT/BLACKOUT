@@ -43,7 +43,15 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         private const val TAG = "BlackoutBle"
         private const val MAX_LINKS = 6
         private const val RETRY_MS = 5_000L
+        private const val SWEEP_MS = 5_000L
+        private const val STALE_MS = 5_000L    // at the link limit, a link with no HELLO this old makes room
         fun owns(peer: String) = peer.startsWith(PREFIX)
+        // Status notes, in plain words (Home and Connections show them).
+        private const val OFF = "Bluetooth is off"
+        private const val NOT_READY = "Bluetooth isn't ready right now"
+        private const val SCAN_FAILED = "can't search right now"
+        private const val ADV_FAILED = "other phones can't find this one right now"
+        private const val NO_PERMISSION = "needs the Nearby devices permission"
     }
 
     private class Link(val id: String, val central: Boolean, val address: String) {
@@ -55,8 +63,11 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         var remote: String? = null
         var up = false         // known to the router
         var busy = false       // a write or notification is in flight
-        val out = ArrayDeque<ByteArray>()
+        val createdAt = SystemClock.elapsedRealtime()
+        var openedAt = 0L      // when setup finished: the other side's HELLO must come within 10 s
+        val out = BleProtocol.Outbox()                // capped: oldest packet frames go first
         val reader = BleProtocol.Reader()
+        val gate = BleProtocol.HelloGate()            // repeated HELLOs (spec "Restarts")
     }
 
     private val h = Handler(HandlerThread("ble").apply { start() }.looper)
@@ -71,16 +82,31 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
     private var running = false
     private var nextId = 0
     @Volatile private var upCount = 0
+    @Volatile private var upNodes = emptySet<String>()
     @Volatile private var note = ""
 
     fun linkCount() = upCount
-    fun statusLine() = "Bluetooth LE: $upCount link(s)" + if (note.isNotEmpty()) " · $note" else ""
+    /** Node ids of the phones linked right now (after HELLO). Any thread. */
+    fun nodes(): Set<String> = upNodes
+    fun statusLine() = if (note == OFF) OFF else "Bluetooth: " + when (upCount) { 0 -> "no phones yet"; 1 -> "1 phone linked"; else -> "$upCount phones linked" } +
+        if (note.isNotEmpty()) " · $note" else ""
+
+    /** Battery saver: a slower Bluetooth search (MeshEngine.setBatterySaver). */
+    fun setSaver(on: Boolean) = h.post {
+        if (!running) return@post
+        val sc = manager?.adapter?.bluetoothLeScanner ?: return@post
+        try { sc.stopScan(scanCb); sc.startScan(scanFilters(), scanSettings(on), scanCb) } catch (e: RuntimeException) { set(SCAN_FAILED) }
+    }
+    private fun scanFilters() = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(service)).build())
+    private fun scanSettings(saver: Boolean = MeshEngine.batterySaver(ctx)) =
+        ScanSettings.Builder().setScanMode(if (saver) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_BALANCED).build()
 
     fun start() {
         h.post {
             ctx.registerReceiver(btState, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), null, h,
                 if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0)
             up()
+            h.postDelayed(::sweep, SWEEP_MS)
         }
     }
 
@@ -92,11 +118,14 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
 
     // ---- start / stop -------------------------------------------------------------------------
 
-    private fun up() {
+    /** A permission taken away while running throws SecurityException: say so instead of crashing the service. */
+    private fun up() = try { start2() } catch (e: SecurityException) { set(NO_PERMISSION) }
+
+    private fun start2() {
         val m = manager; val a = m?.adapter
-        if (m == null || a == null || !a.isEnabled) { set("Bluetooth is off"); return }
+        if (m == null || a == null || !a.isEnabled) { set(OFF); return }
         if (running) return
-        val s = m.openGattServer(ctx, serverCb) ?: run { set("GATT server unavailable"); return }
+        val s = m.openGattServer(ctx, serverCb) ?: run { set(NOT_READY); return }
         running = true; server = s; set("")
         val svc = BluetoothGattService(service, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         svc.addCharacteristic(BluetoothGattCharacteristic(BleProtocol.RX,
@@ -108,9 +137,8 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         svc.addCharacteristic(tx)
         s.addService(svc) // advertising starts once the service is added
         try { // throws if Bluetooth turns off in the meantime
-            a.bluetoothLeScanner?.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(service)).build()),
-                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build(), scanCb)
-        } catch (e: RuntimeException) { set("scan failed: ${e.message}") }
+            a.bluetoothLeScanner?.startScan(scanFilters(), scanSettings(), scanCb)
+        } catch (e: RuntimeException) { set(SCAN_FAILED) }
     }
 
     private fun down() {
@@ -125,20 +153,20 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
 
     private fun advertise() {
         if (!running) return
-        val adv = manager?.adapter?.bluetoothLeAdvertiser ?: run { set("advertising not supported"); return }
+        val adv = manager?.adapter?.bluetoothLeAdvertiser ?: run { set(ADV_FAILED); return }
         try { // throws if Bluetooth turns off in the meantime
             adv.startAdvertising(
                 AdvertiseSettings.Builder().setConnectable(true).setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                     .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH).build(),
                 AdvertiseData.Builder().setIncludeDeviceName(false).addServiceUuid(ParcelUuid(service)).build(), advCb)
-        } catch (e: RuntimeException) { set("advertising failed: ${e.message}") }
+        } catch (e: RuntimeException) { set(ADV_FAILED) }
     }
 
     private val advCb = object : AdvertiseCallback() {
-        override fun onStartSuccess(s: AdvertiseSettings) { h.post { if (note.startsWith("advertising")) set("") } }
+        override fun onStartSuccess(s: AdvertiseSettings) { h.post { if (note == ADV_FAILED) set("") } }
         override fun onStartFailure(code: Int) {
             h.post {
-                set("advertising failed ($code)")
+                set(ADV_FAILED)
                 if (code != ADVERTISE_FAILED_ALREADY_STARTED && code != ADVERTISE_FAILED_FEATURE_UNSUPPORTED) h.postDelayed(::advertise, 10_000)
             }
         }
@@ -148,7 +176,7 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         override fun onReceive(c: Context, i: Intent) { // runs on h
             when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
                 BluetoothAdapter.STATE_ON -> up()
-                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> { down(); set("Bluetooth is off") }
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> { down(); set(OFF) }
             }
         }
     }
@@ -157,14 +185,15 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
 
     private val scanCb = object : ScanCallback() {
         override fun onScanResult(type: Int, r: ScanResult) { val d = r.device; h.post { dial(d) } }
-        override fun onScanFailed(code: Int) { h.post { set("scan failed ($code)") } }
+        override fun onScanFailed(code: Int) { h.post { set(SCAN_FAILED) } }
     }
 
     private fun dial(d: BluetoothDevice) {
         val addr = d.address
-        if (!running || links.size >= MAX_LINKS || links.values.any { it.central && it.address == addr }) return
+        if (!running || links.values.any { it.central && it.address == addr }) return
         if (SystemClock.elapsedRealtime() < (retryAt[addr] ?: 0L)) return
         nodeOf[addr]?.let { n -> if (links.values.any { it.up && it.remote == n }) return } // already linked the other way
+        if (links.size >= MAX_LINKS && !makeRoom()) return
         val l = Link(PREFIX + (++nextId), central = true, address = addr)
         links[l.id] = l
         Log.d(TAG, "dial $addr as ${l.id}")
@@ -198,7 +227,7 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, st: Int) {
             val l = linkOf(g) ?: return
             if (st != BluetoothGatt.GATT_SUCCESS) { drop(l); return }
-            l.open = true; enqueue(l, BleProtocol.hello(nodeId))
+            l.open = true; l.openedAt = SystemClock.elapsedRealtime(); enqueue(l, BleProtocol.hello(nodeId), hello = true)
         }
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, st: Int) {
             val l = linkOf(g) ?: return
@@ -221,7 +250,7 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
 
     private val serverCb = object : BluetoothGattServerCallback() { // binder threads: move to h
         override fun onServiceAdded(st: Int, s: BluetoothGattService) {
-            h.post { if (st == BluetoothGatt.GATT_SUCCESS) advertise() else set("GATT service failed ($st)") }
+            h.post { if (st == BluetoothGatt.GATT_SUCCESS) advertise() else set(NOT_READY) }
         }
         override fun onConnectionStateChange(d: BluetoothDevice, st: Int, ns: Int) {
             if (ns == BluetoothProfile.STATE_DISCONNECTED) h.post { mtus.remove(d.address); peripheralLink(d)?.let { drop(it) } }
@@ -236,12 +265,12 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
                 if (desc.uuid != BleProtocol.CCCD) return@post
                 val existing = peripheralLink(d)
                 if (value != null && value.isNotEmpty() && (value[0].toInt() and 1) != 0) { // notifications enabled
-                    if (existing != null || links.size >= MAX_LINKS) return@post
+                    if (existing != null || (links.size >= MAX_LINKS && !makeRoom())) return@post
                     val l = Link(PREFIX + (++nextId), central = false, address = d.address)
-                    l.device = d; l.chunk = BleProtocol.chunkSize(mtus[d.address] ?: 23); l.open = true
+                    l.device = d; l.chunk = BleProtocol.chunkSize(mtus[d.address] ?: 23); l.open = true; l.openedAt = l.createdAt
                     links[l.id] = l
                     Log.d(TAG, "${d.address} subscribed as ${l.id}")
-                    enqueue(l, BleProtocol.hello(nodeId))
+                    enqueue(l, BleProtocol.hello(nodeId), hello = true)
                 } else existing?.let { drop(it) }
             }
         }
@@ -273,19 +302,20 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
 
     // ---- both roles ---------------------------------------------------------------------------
 
-    private fun enqueue(l: Link, frame: ByteArray) { l.out.addAll(BleProtocol.chunks(frame, l.chunk)); pump(l) }
+    /** Queues a frame; the queue is capped (BleProtocol.Outbox): the oldest packet frames go first, HELLO never. */
+    private fun enqueue(l: Link, frame: ByteArray, hello: Boolean = false) { l.out.add(frame, hello); pump(l) }
 
     /** Sends the next chunk once the previous write or notification has completed. */
     private fun pump(l: Link) {
         if (l.busy || !l.open || links[l.id] !== l) return
-        val c = l.out.firstOrNull() ?: return
+        val c = l.out.peek(l.chunk) ?: return
         val ok = try {
             if (l.central) { val g = l.gatt; val rx = l.rx; g != null && rx != null && writeChar(g, rx, c) }
             else { val s = server; val d = l.device; val t = tx; s != null && d != null && t != null && notify(s, d, t, c) }
         } catch (e: RuntimeException) { // the Bluetooth stack throws on some bad states: lose the link, not the app
             Log.w(TAG, "${l.id}: send failed: $e"); drop(l, hard = true); return
         }
-        if (ok) { l.out.removeFirst(); l.busy = true } else h.postDelayed({ pump(l) }, 100) // stack busy: try again
+        if (ok) { l.out.commit(); l.busy = true } else h.postDelayed({ pump(l) }, 100) // stack busy: try again
     }
 
     private fun onChunk(l: Link, chunk: ByteArray) {
@@ -300,8 +330,13 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
                     if (remote == null || remote == nodeId) { drop(l, hard = true); return }
                     when (l.remote) {
                         null -> hello(l, remote)
-                        // spec "Restarts": the other app restarted on a connection that stayed up
-                        remote -> { enqueue(l, BleProtocol.hello(nodeId)); if (l.up) MeshEngine.router?.peerUp(l.id) }
+                        // spec "Restarts": the other app restarted on a connection that stayed up. Answer and send
+                        // everything stored again, each at most once a minute (no HELLO ping-pong, no endless re-sync).
+                        remote -> {
+                            val (answer, resync) = l.gate.repeated(SystemClock.elapsedRealtime(), l.out.isEmpty)
+                            if (answer) enqueue(l, BleProtocol.hello(nodeId), hello = true)
+                            if (resync && l.up) MeshEngine.router?.peerUp(l.id)
+                        }
                         else -> { drop(l, hard = true); return }
                     }
                 }
@@ -346,7 +381,31 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         recount()
     }
 
-    private fun recount() { upCount = links.values.count { it.up }; MeshEngine.notifyUi() }
+    /**
+     * Every 5 s: closes links whose other side sent no HELLO within 10 s of the link opening, and central links still
+     * setting up after 30 s (spec "Limits"). A peripheral-role link is only forgotten, like any dropped one.
+     */
+    private fun sweep() {
+        val now = SystemClock.elapsedRealtime()
+        links.values.filter { l ->
+            l.remote == null && if (l.open) now - l.openedAt >= BleProtocol.HELLO_WAIT_MS else now - l.createdAt >= BleProtocol.SETUP_WAIT_MS
+        }.forEach { Log.d(TAG, "${it.id}: no HELLO, closing"); drop(it) }
+        h.postDelayed(::sweep, SWEEP_MS)
+    }
+
+    /** At the link limit: forgets the oldest link whose other side hasn't sent HELLO after 5 s, if any. */
+    private fun makeRoom(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val stale = links.values.filter { it.remote == null && now - it.createdAt >= STALE_MS }.minByOrNull { it.createdAt } ?: return false
+        Log.d(TAG, "link limit: closing ${stale.id}, no HELLO yet"); drop(stale)
+        return true
+    }
+
+    private fun recount() {
+        val up = links.values.filter { it.up }
+        upCount = up.size; upNodes = up.mapNotNull { it.remote }.toSet()
+        MeshEngine.notifyUi()
+    }
     private fun set(n: String) { note = n; MeshEngine.notifyUi() }
 
     @Suppress("DEPRECATION")

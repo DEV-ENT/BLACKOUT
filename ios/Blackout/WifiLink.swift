@@ -1,10 +1,13 @@
 import Foundation
 import Network
+import UIKit
 import BlackoutCore
 
 /// Links to DarkProof phones (iPhone or Android) on the same Wi-Fi network over TCP, found with Bonjour
 /// (spec/FORMAT.md, "Wi-Fi networks"): a router with no internet, a hotspot, a community network or a rooftop link.
 /// Only the phone with the smaller node id connects to a discovered phone; an address the user typed is always dialed.
+/// The listener and the Bonjour browser start again after any failure, and when the app comes back to the foreground
+/// (iOS may stop them while the app is suspended): the browser always, the listener unless it is still ready.
 final class WifiLink {
     static let prefix = "wifi:"
     static let serviceType = "_darkproof._tcp"
@@ -13,6 +16,7 @@ final class WifiLink {
     static let maxLinks = 32
     private static let hello = Data("DPW1".utf8)
     private static let retryDelay = 5.0
+    private static let helloWait = 10.0   // the other side's HELLO must come within this
 
     private let q = DispatchQueue(label: "wifi")
     private let nodeId: String
@@ -20,7 +24,7 @@ final class WifiLink {
     private let onStatus: (String?) -> Void
     private var listener: NWListener?
     private var browser: NWBrowser?
-    private var links: [String: (node: String, conn: NWConnection)] = [:] // router peer id -> link
+    private var links: [String: (node: String, conn: NWConnection, dialed: Bool, since: Date)] = [:] // router peer id -> link
     private var byNode: [String: String] = [:]                              // node id -> router peer id
     private var found: [String: NWEndpoint] = [:]                           // discovered node id -> endpoint
     private var dialing = Set<String>()
@@ -29,10 +33,22 @@ final class WifiLink {
     private var manualTarget: (host: String, port: UInt16)?
     private var manualConn: NWConnection?
     private var manualGen = 0
+    private var manualNode: String?        // who answered at the typed address last time
     private var note = ""
+    private var listenGen = 0, browseGen = 0 // ignore state updates of a listener or browser already replaced
+    private var listenRetry = 2.0, browseRetry = 2.0
 
     init(nodeId: String, router: MeshRouter, onStatus: @escaping (String?) -> Void) {
         self.nodeId = nodeId; self.router = router; self.onStatus = onStatus
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
+            guard let self else { return }
+            self.q.async {
+                guard self.running else { return }
+                // A listener that is still ready keeps its port (7777 would be busy for a moment after closing it).
+                if let l = self.listener, case .ready = l.state {} else { self.listen(on: Self.port) }
+                self.browse()
+            }
+        }
     }
 
     var nodes: Set<String> { q.sync { Set(byNode.keys) } }
@@ -45,10 +61,7 @@ final class WifiLink {
             guard !self.running else { return }
             self.running = true
             self.listen(on: Self.port)
-            let b = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
-            b.browseResultsChangedHandler = { [weak self] results, _ in self?.discovered(results) }
-            b.start(queue: self.q)
-            self.browser = b
+            self.browse()
             self.retryLoop()
             self.report()
         }
@@ -57,6 +70,7 @@ final class WifiLink {
     func stop() {
         q.async {
             self.running = false
+            self.listenGen += 1; self.browseGen += 1
             self.listener?.cancel(); self.listener = nil
             self.browser?.cancel(); self.browser = nil
             self.found = [:]
@@ -70,7 +84,7 @@ final class WifiLink {
     func connect(host: String, port: UInt16) {
         q.async {
             self.stopManualLocked()
-            self.manualTarget = (host, port)
+            self.manualTarget = (host, port); self.manualNode = nil
             self.dialManual(self.manualGen, host, port)
         }
     }
@@ -90,18 +104,72 @@ final class WifiLink {
 
     // MARK: - Listening and discovery
 
+    /// (Re)starts the listener on 7777, or on any free port if 7777 is taken. After any failure it starts again,
+    /// later and later (2 s, then up to 30 s).
     private func listen(on port: UInt16) {
+        guard running else { return }
+        listenGen += 1
+        let gen = listenGen
+        listener?.cancel(); listener = nil
         let l: NWListener
         do { l = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!) }
-        catch { guard port != 0, let any = try? NWListener(using: .tcp) else { note = "can't listen"; return }; l = any }
+        catch {
+            guard port != 0, let any = try? NWListener(using: .tcp) else { note = "can't listen"; relisten(gen); return }
+            l = any
+        }
         l.service = NWListener.Service(name: nodeId, type: Self.serviceType)
-        l.newConnectionHandler = { [weak self] c in self?.run(c) }
+        l.newConnectionHandler = { [weak self] c in self?.run(c, dialed: false) }
         l.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            if case .failed = state, port == Self.port { l.cancel(); self.listen(on: 0) } // 7777 taken: any free port
+            guard let self, gen == self.listenGen else { return }
+            switch state {
+            case .ready: self.listenRetry = 2; if self.note == "can't listen" { self.note = "" }
+            case .failed:
+                l.cancel(); self.listener = nil
+                if port == Self.port { self.listen(on: 0) } else { self.relisten(gen) } // 7777 taken: any free port
+            default: break
+            }
         }
         l.start(queue: q)
         listener = l
+    }
+
+    private func relisten(_ gen: Int) {
+        let wait = listenRetry; listenRetry = min(listenRetry * 2, 30)
+        q.asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self, self.running, gen == self.listenGen else { return }
+            self.listen(on: Self.port)
+        }
+    }
+
+    /// (Re)starts the Bonjour browser; after a failure it starts again, later and later (2 s, then up to 30 s).
+    private func browse() {
+        guard running else { return }
+        browseGen += 1
+        let gen = browseGen
+        browser?.cancel()
+        let b = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
+        b.browseResultsChangedHandler = { [weak self] results, _ in
+            guard let self, gen == self.browseGen else { return }
+            self.discovered(results)
+        }
+        b.stateUpdateHandler = { [weak self] state in
+            guard let self, gen == self.browseGen else { return }
+            switch state {
+            case .ready: self.browseRetry = 2; self.setDenied(false)
+            case .waiting(let e): // the user refused Local Network: Bonjour waits for ever
+                if case .dns(let code) = e, code == -65570 { self.setDenied(true) } // kDNSServiceErr_PolicyDenied
+            case .failed:
+                b.cancel(); self.browser = nil
+                let wait = self.browseRetry; self.browseRetry = min(self.browseRetry * 2, 30)
+                self.q.asyncAfter(deadline: .now() + wait) { [weak self] in
+                    guard let self, self.running, gen == self.browseGen else { return }
+                    self.browse()
+                }
+            default: break
+            }
+        }
+        b.start(queue: q)
+        browser = b
     }
 
     private func discovered(_ results: Set<NWBrowser.Result>) {
@@ -119,7 +187,7 @@ final class WifiLink {
         for (node, endpoint) in found where nodeId < node && byNode[node] == nil && !dialing.contains(node) {
             dialing.insert(node)
             let c = NWConnection(to: endpoint, using: .tcp)
-            run(c) { [weak self] in self?.dialing.remove(node) }
+            run(c, dialed: true) { [weak self] in self?.dialing.remove(node) }
         }
     }
 
@@ -130,11 +198,17 @@ final class WifiLink {
         }
     }
 
+    /// While the phone at that address is linked another way (it dialed this phone), it isn't dialed again.
     private func dialManual(_ g: Int, _ host: String, _ port: UInt16) {
         guard g == manualGen, let p = NWEndpoint.Port(rawValue: port) else { return }
+        if let n = manualNode, byNode[n] != nil {
+            q.asyncAfter(deadline: .now() + Self.retryDelay) { [weak self] in self?.dialManual(g, host, port) }
+            return
+        }
         let c = NWConnection(host: NWEndpoint.Host(host), port: p, using: .tcp)
         manualConn = c
-        run(c, failed: { [weak self] in self?.note = "can't reach \(host):\(port), retrying" }) { [weak self] in
+        run(c, dialed: true, failed: { [weak self] in self?.note = "can't reach \(host):\(port), retrying" },
+            hello: { [weak self] node in if g == self?.manualGen { self?.manualNode = node } }) { [weak self] in
             guard let self, g == self.manualGen else { return }
             self.q.asyncAfter(deadline: .now() + Self.retryDelay) { self.dialManual(g, host, port) }
         }
@@ -143,8 +217,10 @@ final class WifiLink {
 
     // MARK: - One link
 
-    /// Runs one connection: HELLO both ways, then packets. `ended` runs once when it closes or fails.
-    private func run(_ c: NWConnection, failed: (() -> Void)? = nil, ended: (() -> Void)? = nil) {
+    /// Runs one connection: HELLO both ways, then packets. `dialed`: this phone opened it. `hello` gets the other
+    /// side's node id; `ended` runs once when the connection closes or fails.
+    private func run(_ c: NWConnection, dialed: Bool, failed: (() -> Void)? = nil, hello: ((String) -> Void)? = nil,
+                     ended: (() -> Void)? = nil) {
         var id: String?, linkNode: String?
         var finished = false
         func finish() {
@@ -164,13 +240,23 @@ final class WifiLink {
             case .ready:
                 self.note = ""
                 c.send(content: Self.frame(Self.hello + Data(self.nodeId.utf8)), completion: .contentProcessed { _ in })
+                self.q.asyncAfter(deadline: .now() + Self.helloWait) { if id == nil && !finished { c.cancel() } } // no HELLO in time
                 self.readHello(c) { node in
-                    guard let node, node != self.nodeId, self.links.count < Self.maxLinks else { c.cancel(); return }
+                    guard let node, node != self.nodeId, !finished else { c.cancel(); return }
+                    hello?(node)
+                    guard self.links.count < Self.maxLinks else { c.cancel(); return }
+                    let now = Date()
+                    if let old = self.byNode[node], let o = self.links[old] {
+                        // spec "Restarts and duplicate links": both phones keep the same link
+                        let ageMs = Int64(now.timeIntervalSince(o.since) * 1000)
+                        guard DuplicateLinks.keepNew(myId: self.nodeId, remoteId: node, newDialedByMe: dialed,
+                                                     oldDialedByMe: o.dialed, oldAgeMs: ageMs) else { c.cancel(); return }
+                        o.conn.cancel()
+                    }
                     self.count += 1
                     let peer = Self.prefix + node + "#" + String(self.count)
                     id = peer; linkNode = node
-                    self.links[peer] = (node, c)
-                    if let old = self.byNode[node], let oldConn = self.links[old]?.conn { oldConn.cancel() } // newer replaces older
+                    self.links[peer] = (node, c, dialed, now)
                     self.byNode[node] = peer
                     self.router.peerUp(peer)
                     self.report()
@@ -215,6 +301,15 @@ final class WifiLink {
 
     private static func frame(_ b: Data) -> Data {
         Data([UInt8(b.count >> 24 & 0xFF), UInt8(b.count >> 16 & 0xFF), UInt8(b.count >> 8 & 0xFF), UInt8(b.count & 0xFF)]) + b
+    }
+
+    /// Whether iOS refused Local Network to DarkProof (the Bonjour browser waits with "policy denied"). Any thread.
+    var localNetworkDenied: Bool { deniedLock.lock(); defer { deniedLock.unlock() }; return _denied }
+    private let deniedLock = NSLock()
+    private var _denied = false
+    private func setDenied(_ v: Bool) {
+        deniedLock.lock(); let changed = _denied != v; _denied = v; deniedLock.unlock()
+        if changed { note = v ? "Local Network not allowed" : ""; report() }
     }
 
     private func report() {

@@ -35,6 +35,9 @@ public struct Spot: Equatable, Sendable {
         guard let a = accuracy, (0...99_999).contains(a) else { return ll }
         return ll + " ±\(a)m"
     }
+
+    /// The 10-digit Plus Code of this position, like "8FQFF57R+M2" (about 14 × 14 m), or nil if it is not valid.
+    public var plusCode: String? { isValid ? PlusCode.encode(lat: lat, lon: lon) : nil }
 }
 
 /// Distance and direction between two positions on the Earth (spherical model, good to about 0.5%).

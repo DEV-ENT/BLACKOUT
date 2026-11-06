@@ -86,28 +86,36 @@ class MeshCoreLink(private val ctx: Context) {
     private var timeout: Runnable? = null
     private var slot = -1
     private var syncing = false
+    private var addr: String? = null // the radio being set up or linked; saved only once setup succeeds
+    private var pumping = false
     @Volatile var connected = false; private set
     @Volatile var status = "MeshCore: no radio"; private set
 
     private fun set(s: String) { status = "MeshCore: $s"; MeshEngine.notifyUi() }
     fun offer(p: Packet) = queue.offer(p)
-    fun start() { if (prefs.getString("meshcore", null) != null) connect(); pump() }
-    fun select(addr: String) { prefs.edit().putString("meshcore", addr).apply(); close(); connect() }
+    /** A radio was set up here before: it is linked again whenever it is in reach. */
+    val paired get() = prefs.getString("meshcore", null) != null
+    fun start() { prefs.getString("meshcore", null)?.let(::connect) }
+    fun select(a: String) { close(); connect(a) }
+    /** "Forget radio": no more linking to it. */
+    fun forget() { prefs.edit().remove("meshcore").apply(); addr = null; close(); set("no radio") }
 
     fun scan(found: (addr: String, name: String) -> Unit) {
-        val s = adapter?.bluetoothLeScanner ?: run { set("Bluetooth is off"); return }
+        val s = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner ?: run { set("Bluetooth is off"); return }
         val cb = object : ScanCallback() {
-            override fun onScanResult(t: Int, r: ScanResult) { h.post { found(r.device.address, r.device.name ?: r.device.address) } }
+            override fun onScanResult(t: Int, r: ScanResult) { h.post { found(r.device.address, r.device.name ?: "Unnamed device") } }
         }
-        s.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()), ScanSettings.Builder().build(), cb)
-        h.postDelayed({ s.stopScan(cb) }, 15_000)
+        try { s.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()), ScanSettings.Builder().build(), cb) }
+        catch (e: RuntimeException) { set("can't search right now"); return }
+        h.postDelayed({ runCatching { s.stopScan(cb) } }, 15_000)
     }
 
-    private fun connect() {
-        val addr = prefs.getString("meshcore", null) ?: return
-        val a = adapter ?: return
+    private fun connect(a: String) {
+        val ad = adapter ?: return
+        addr = a
         set("connecting…")
-        gatt = a.getRemoteDevice(addr).connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE)
+        gatt = try { ad.getRemoteDevice(a).connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) } catch (e: RuntimeException) { set("can't connect"); null }
+        if (!pumping) { pumping = true; h.postDelayed(::pump, 1_000) }
     }
 
     private fun close() {
@@ -117,7 +125,14 @@ class MeshCoreLink(private val ctx: Context) {
         gatt?.close(); gatt = null; rx = null
     }
 
-    private fun retry(why: String) { close(); set("$why, retrying"); h.postDelayed({ if (gatt == null) connect() }, 10_000) }
+    /** A paired radio is tried again every 10 s; a new one that failed is left alone (it wasn't saved). */
+    private fun retry(why: String) {
+        close(); val a = addr
+        if (a != null && a == prefs.getString("meshcore", null)) { set("$why, retrying"); h.postDelayed({ if (gatt == null && addr == a) connect(a) }, 10_000) }
+        else set(why)
+    }
+    /** Not a radio DarkProof can use (other Bluetooth gadgets share its service): no retrying. */
+    private fun fail(why: String) { close(); set(why) }
 
     /** Queues a command; [reply] gets its reply frame, or null if none came within 5 s. */
     private fun command(frame: ByteArray, reply: (ByteArray?) -> Unit = {}) { commands.addLast(frame to reply); next() }
@@ -148,7 +163,7 @@ class MeshCoreLink(private val ctx: Context) {
     /** Connected and subscribed: check the firmware, start, find or add the DarkProof channel. */
     private fun setUp() {
         command(MeshCore.deviceQuery()) { f ->
-            val info = f?.let(MeshCore::deviceInfo) ?: return@command retry("not a MeshCore radio")
+            val info = f?.let(MeshCore::deviceInfo) ?: return@command fail("not a MeshCore radio")
             if (info.firmware < MeshCore.MIN_FIRMWARE) { close(); set("firmware too old: update the radio to MeshCore 1.15 or newer"); return@command }
             command(MeshCore.appStart()) { s -> if (s == null || s[0].toInt() != MeshCore.SELF_INFO) retry("no answer from the radio") else findSlot(0, info.channels, -1) }
         }
@@ -171,6 +186,7 @@ class MeshCoreLink(private val ctx: Context) {
 
     private fun ready(idx: Int) {
         slot = idx; connected = true; set("radio connected")
+        addr?.let { prefs.edit().putString("meshcore", it).apply() } // set up: from now on it is the paired radio
         Thread { MeshEngine.router?.peerUp(PEER); MeshEngine.notifyUi() }.start()
         sync()
     }
@@ -187,7 +203,9 @@ class MeshCoreLink(private val ctx: Context) {
         }
     }
 
+    /** Runs only while a radio is being set up, linked or paired, so a phone without one doesn't wake every second. */
     private fun pump() {
+        if (gatt == null && !paired) { pumping = false; return }
         if (connected && waiting == null && commands.isEmpty()) queue.next()?.let { p -> command(MeshCore.sendData(slot, p.encode())) }
         h.postDelayed(::pump, 1_000)
     }
@@ -204,7 +222,7 @@ class MeshCoreLink(private val ctx: Context) {
             val s = g.getService(SERVICE)
             val tx = s?.getCharacteristic(TX); rx = s?.getCharacteristic(RX)
             val d = tx?.getDescriptor(CCCD)
-            if (st != BluetoothGatt.GATT_SUCCESS || tx == null || d == null || rx == null) { retry("not a MeshCore radio"); return@post }
+            if (st != BluetoothGatt.GATT_SUCCESS || tx == null || d == null || rx == null) { fail("not a MeshCore radio"); return@post }
             g.setCharacteristicNotification(tx, true)
             d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
             if (!g.writeDescriptor(d)) retry("couldn't subscribe")

@@ -65,6 +65,18 @@ final class LoraLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         }
     }
 
+    /// Whether a radio is paired with this phone (it reconnects to it by itself).
+    var hasRadio: Bool { UserDefaults.standard.string(forKey: Self.savedKey) != nil }
+
+    /// Forgets the paired radio: disconnects and stops reconnecting. iOS may keep its Bluetooth pairing (Settings > Bluetooth).
+    func forget() {
+        q.async {
+            UserDefaults.standard.removeObject(forKey: Self.savedKey)
+            self.close()
+            self.status("no radio")
+        }
+    }
+
     func select(_ id: UUID) {
         q.async {
             UserDefaults.standard.set(id.uuidString, forKey: Self.savedKey)

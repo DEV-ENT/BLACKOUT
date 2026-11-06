@@ -48,4 +48,27 @@ final class BleProtocolTests: XCTestCase {
         XCTAssertFalse(BleProtocol.keepMyCentralLink(myId: "7c0d995b-2c4", remoteId: "259b6c4d-e98"))
         XCTAssertTrue(BleProtocol.keepMyCentralLink(myId: "abc", remoteId: "abcd"))
     }
+    /// Same checks as Android's BleProtocolTest.repeatedHelloIsAnsweredAtMostOncePerMinute.
+    func testRepeatedHelloIsAnsweredAtMostOncePerMinute() {
+        var g = BleProtocol.HelloGate()
+        XCTAssertTrue(g.repeated(nowMs: 1_000, queueEmpty: true) == (true, true))     // a restart: answer and send everything again
+        XCTAssertTrue(g.repeated(nowMs: 30_000, queueEmpty: true) == (false, false))  // within a minute: neither (no ping-pong)
+        XCTAssertTrue(g.repeated(nowMs: 61_000, queueEmpty: false) == (true, false))  // queue still busy: answer only
+        XCTAssertTrue(g.repeated(nowMs: 62_000, queueEmpty: true) == (false, true))
+    }
+
+    /// Same checks as Android's BleProtocolTest.outboxIsCappedAndKeepsHello.
+    func testOutboxIsCappedAndKeepsHello() {
+        var o = BleProtocol.Outbox(maxBytes: 100, maxFrames: 3)
+        let hello = BleProtocol.hello(nodeId: "node-a")
+        o.add(hello, hello: true)
+        o.add(Data(repeating: 1, count: 40)); o.add(Data(repeating: 2, count: 40)); o.add(Data(repeating: 3, count: 40))
+        XCTAssertEqual(o.count, 3); XCTAssertEqual(o.bytes, hello.count + 80)
+        XCTAssertEqual(o.peek(5), hello.prefix(5)); o.commit()           // half of the HELLO went out...
+        o.add(Data(repeating: 4, count: 40))                              // ...so it stays; frame 2 goes
+        var rest = Data()
+        while let c = o.peek(7) { rest += c; o.commit() }
+        XCTAssertEqual(rest, hello.dropFirst(5) + Data(repeating: 3, count: 40) + Data(repeating: 4, count: 40))
+        XCTAssertTrue(o.isEmpty); XCTAssertEqual(o.bytes, 0)
+    }
 }

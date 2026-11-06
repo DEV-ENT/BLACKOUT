@@ -7,7 +7,7 @@ DarkProof is a messaging app that keeps working when there is no internet. It ha
 ## What stays on your phone
 
 - The name and group codes you enter.
-- Every message packet your phone receives or sends. This includes encrypted packets from other groups that your phone passes on but cannot read. Your groups' messages stay until you delete the app, the newest 2,000 Everyone messages are kept, and packets your phone can't read are removed after 7 days.
+- Every message packet your phone receives or sends. This includes encrypted packets from other groups that your phone passes on but cannot read. Your groups' messages stay until you delete the app, the newest 2,000 Everyone messages are kept, and packets your phone can't read are removed after 7 days. The store is capped at about 40 MB: when it is full, packets your phone can't read go first.
 - Your conversation with the AI assistant, and any AI models you download.
 - The LoRa radios you paired, if any.
 - The people you blocked and the messages you reported or hid.
@@ -21,7 +21,8 @@ Messages travel to nearby phones running DarkProof over Bluetooth, Wi-Fi peer-to
 - **Places you share** (water, shelter, charging, medical) are Everyone messages: anyone with DarkProof can read them, including the position if you choose to add yours.
 - Each message carries the name you entered and a random ID for your phone.
 - **Photos you send** are group messages too: shrunk to a few hundred pixels and encrypted for your group.
-- **Check-ins** ("I'm safe", "I need help") carry your battery level.
+- **Check-ins** ("I'm safe", "I need help") carry your battery level, and for "I need help" the needs you tick (for example injured or need water) and how many people are with you.
+- **Check-ins for someone else** ("Grandma is safe") carry that person's name and status, and the position if you add one. They are shown as reported by you, never as that person's own check-in.
 - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
 - **Delivery receipts:** your phone tells your group which of their messages it received, so they can see "Delivered". Receipts are encrypted for your group too.
 
@@ -31,7 +32,7 @@ With **Internet** on (Connections screen, on unless you turn it off), and while 
 
 - **The relays** are run by other people, not by us: nos.lol, relay.damus.io, relay.primal.net, nostr.mom, nostr.oxtr.dev and relay.ditto.pub (with Tor: relay.damus.io, relay.primal.net, nostr.oxtr.dev, relay.ditto.pub, relay.nostr.net and nostr.data.haus). Their own privacy policies apply to what they receive.
 - **What your phone sends them:** each message packet once, exactly as it travels between phones. Group messages stay encrypted; the relays cannot read them. Everyone messages and places can be read by anyone with DarkProof, so relays and anyone using them could read them too. Your phone also passes on packets of other groups it is carrying, which it cannot read. That helps a neighbourhood without internet reach the rest of the world.
-- **What the relays can see:** your internet (IP) address, unless you use Tor; when each packet was sent; a random key your phone makes new every time the app starts; and a short "mailbox" tag that many groups share, which lets your phone ask only for packets that might be for you.
+- **What the relays can see:** your internet (IP) address, unless you use Tor; when each packet was sent; a random key your phone makes new every time the app starts; and a short "mailbox" tag for each of your saved groups and for Everyone, which lets your phone ask only for packets that might be for you. Many groups share each tag, but a relay can tell that the same phone asked for the same tags, and so which tags belong together.
 - **How long they keep it:** each packet is marked to be deleted after 7 days. Relays are asked to delete it then, but we cannot check or force them to.
 - **Reports:** when you report an Everyone message, your phone hides it, and sends the relays a standard Nostr report that names that message and its random sender key. It does not include your name.
 
@@ -46,12 +47,16 @@ Only when you ask for them:
 - **AI model downloads**, when you tap Download. Models come from Hugging Face (huggingface.co), which sees your IP address like any website. Your questions to the AI never leave the phone.
 - **Street maps**, when you tap Download map, or open the map while you have internet. Map data comes from OpenFreeMap (tiles.openfreemap.org), which sees your IP address and which map area is loaded. The saved map stays on your phone.
 - **Send via another app**, when you tap Share "I'm safe" or Share "I need help" (Connections screen). DarkProof hands the app you pick a short plain-text message with your name, battery and, if location is allowed, your position. It is not encrypted: that app, and whoever receives it, can read it.
-- **Wi-Fi board (Android only).** When you turn it on, anyone who joins your phone's Wi-Fi network can read Everyone messages and post new ones from a browser. Group messages are never shown there.
+- **Wi-Fi board (Android only).** When you turn it on, anyone who joins your phone's Wi-Fi network can read Everyone messages and post new ones from a browser, and download the DarkProof Android app from your phone. Group messages are never shown there; blocked, reported and filtered words are hidden there as in the app.
+
+## Invite links and the website
+
+Invite links and QR codes carry your group's name and code. Anyone who has one can read the group: share them only with people you trust. Links to darkproof.app keep the group code after a `#`, a part of the address that browsers never send to the website. The website (darkproof.app) has no trackers and stores nothing about visitors; its host may keep ordinary access logs.
 
 ## Keeping the Everyone chat safe
 
 - **Filter:** in other people's Everyone messages and places, offensive words are masked with bullets on your phone. Nothing is sent anywhere for this.
-- **Report:** hold an Everyone message and tap Report. It is hidden on your phone and reported to the relays (see above).
+- **Report:** hold an Everyone message and tap Report. It is hidden on your phone, and if it came through the internet relays, it is also reported to them (see above).
 - **Block:** hold any message and tap Block. That person's messages, places and check-ins are hidden on your phone. Unblock in Settings.
 - **Contact us** about abuse or anything else at support@darkproof.app.
 
@@ -60,13 +65,17 @@ Only when you ask for them:
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones, and to find and link DarkProof phones on the same Wi-Fi network (router, hotspot or community network).
 - **Internet (Android)**: for the relays, Tor, AI model downloads and maps described above.
-- **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose. On Android, photos come only from the system photo picker, with no camera or photo library permission.
+- **Camera (iPhone, optional)**: only when you tap Take photo or Scan QR code. The QR code is read on the phone. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose. On Android, photos come only from the system photo picker, and QR codes are scanned by Google Play services on the phone, with no camera or photo library permission for DarkProof.
 - **Add to Photos (iPhone, optional)**: only if you save a photo from the chat.
 - **Notifications (optional)**: alerts for new group messages and check-ins, made on your phone. No push server is involved and nothing is sent to Apple, Google or us.
 - **Location (optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.
-  - **Notifications**: to keep the mesh running in the background, and for the message alerts above.
+  - **Notifications**: to keep the mesh running in the background, and for the message alerts above. The notification has a Stop button; unless you stop it, DarkProof starts again after the phone restarts or the app updates, so it keeps passing messages on.
+
+## Shortcuts and quick buttons
+
+The "I'm safe" and "I need help" shortcuts (Siri, Spotlight, the Action button and Shortcuts on iPhone; the quick-settings tile and app shortcuts on Android) send a check-in to your group like the buttons in the app. The Android "I'm safe" tile also works from the lock screen. Alerts on the iPhone carry a fingerprint of the group, never its code. The battery estimate on Home is worked out on your phone from its own battery level and is never sent.
 
 DarkProof sends your location only where you choose: to your group in check-ins if you turn that on, or to everyone when you share a place with your position.
 

@@ -10,7 +10,12 @@ enum Situation {
         lines.append("Group \"\(groupName)\": \(people.count) other \(people.count == 1 ? "person" : "people") have written; \(engine.phones) phone(s) in range right now.")
         for p in people.prefix(15) {
             var parts: [String] = []
-            if let c = p.checkIn { parts.append("\(c == .safe ? "safe" : "NEEDS HELP") (checked in \(ago(p.checkInTs, now)))") }
+            if let c = p.checkIn {
+                let how = p.reportedBy.map { "reported by \($0)" } ?? "checked in"
+                parts.append("\(c == .safe ? "safe" : "NEEDS HELP") (\(how) \(ago(p.checkInTs, now)))")
+                if !p.needs.isEmpty { parts.append("needs: " + Need.text(p.needs)) }
+                if let n = p.people, n > 1 { parts.append("\(n) people") }
+            }
             else { parts.append("has not checked in") }
             parts.append("last heard \(ago(p.lastTs, now))")
             if let b = p.battery { parts.append("battery \(b)%") }

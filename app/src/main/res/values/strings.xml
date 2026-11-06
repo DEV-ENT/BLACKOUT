@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Labels Android shows outside the app: app shortcuts (long-press the icon) and Quick Settings tiles. -->
+<resources>
+    <string name="shortcut_safe">I\'m safe</string>
+    <string name="shortcut_safe_long">Send “I\'m safe” to my group</string>
+    <string name="shortcut_help">I need help</string>
+    <string name="shortcut_help_long">Send “I need help” to my group</string>
+    <string name="shortcut_chat">Chat</string>
+    <string name="shortcut_chat_long">Open the group chat</string>
+    <string name="tile_safe">I\'m safe</string>
+    <string name="tile_help">I need help</string>
+</resources>

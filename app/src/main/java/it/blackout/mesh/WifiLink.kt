@@ -32,12 +32,15 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
         const val MAX_FRAME = 16_064
         const val MAX_LINKS = 32
         private const val RETRY_MS = 5_000L
+        const val HELLO_WAIT_MS = 10_000      // the other side's HELLO must come within this
         private val HELLO = "DPW1".toByteArray()
         fun owns(peer: String) = peer.startsWith(PREFIX)
     }
 
-    private class Link(val id: String, val node: String, val socket: Socket, val out: DataOutputStream) {
+    /** [dialed]: this phone opened the connection. [since]: when the HELLOs were exchanged. */
+    private class Link(val id: String, val node: String, val socket: Socket, val out: DataOutputStream, val dialed: Boolean) {
         val writer = Executors.newSingleThreadExecutor()
+        val since = System.currentTimeMillis()
     }
     private val links = ConcurrentHashMap<String, Link>()   // router peer id -> link
     private val byNode = ConcurrentHashMap<String, Link>()  // node id -> its current link
@@ -58,11 +61,11 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
     fun listen(preferred: Int = PORT): Int {
         if (!listening.compareAndSet(false, true)) return port
         val ss = try { bind(preferred) } catch (_: IOException) {
-            try { bind(0) } catch (e: IOException) { listening.set(false); update("can't listen: ${e.message}"); return 0 }
+            try { bind(0) } catch (e: IOException) { listening.set(false); update("can't open a connection on this network"); return 0 }
         }
         server = ss
         thread(isDaemon = true, name = "wifi-listen") {
-            try { while (true) { val s = ss.accept(); thread(isDaemon = true, name = "wifi-in") { serve(s) } } }
+            try { while (true) { val s = ss.accept(); thread(isDaemon = true, name = "wifi-in") { serve(s, dialed = false) } } }
             catch (_: IOException) { } finally { quiet(ss); server = null; listening.set(false); changed() }
         }
         return ss.localPort
@@ -75,20 +78,26 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
         if (!dialing.add(key)) return
         thread(isDaemon = true, name = "wifi-dial") {
             val s = Socket()
-            try { s.connect(InetSocketAddress(host, port), 5_000); serve(s) } catch (_: IOException) { quiet(s) }
+            try { s.connect(InetSocketAddress(host, port), 5_000); serve(s, dialed = true) } catch (_: IOException) { quiet(s) }
             finally { dialing.remove(key) }
         }
     }
 
-    /** Keeps a link to an address the user typed, redialing every 5 s, until [stopManual] or another address. */
+    /**
+     * Keeps a link to an address the user typed, redialing every 5 s, until [stopManual] or another address. While the
+     * phone at that address is linked another way (it dialed this phone), it isn't dialed again.
+     */
     fun connectManually(host: String, port: Int) {
         val gen = manualGen.incrementAndGet()
         manual = "$host:$port"; update("")
         thread(isDaemon = true, name = "wifi-manual") {
+            var node: String? = null // who answered at that address last time
             while (manualGen.get() == gen) {
-                val s = Socket()
-                try { s.connect(InetSocketAddress(host, port), RETRY_MS.toInt()); if (manualGen.get() == gen) serve(s) else quiet(s) }
-                catch (e: IOException) { quiet(s); if (manualGen.get() == gen) update("can't reach $host:$port, retrying") }
+                if (node == null || !byNode.containsKey(node)) {
+                    val s = Socket()
+                    try { s.connect(InetSocketAddress(host, port), RETRY_MS.toInt()); if (manualGen.get() == gen) serve(s, dialed = true) { node = it } else quiet(s) }
+                    catch (e: IOException) { quiet(s); if (manualGen.get() == gen) update("can't reach $host:$port, retrying") }
+                }
                 if (manualGen.get() == gen) Thread.sleep(RETRY_MS)
             }
         }
@@ -112,13 +121,16 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
         } catch (_: RejectedExecutionException) { } // link already closed
     }
 
-    /** Runs one link until it drops: HELLO both ways, then packets. Blocks the calling thread. */
-    private fun serve(s: Socket) {
+    /**
+     * Runs one link until it drops: HELLO both ways, then packets. Blocks the calling thread. [dialed]: this phone
+     * opened it. [hello] gets the other side's node id.
+     */
+    private fun serve(s: Socket, dialed: Boolean, hello: (String) -> Unit = {}) {
         val r = router() ?: run { quiet(s); return }
         sockets += s
         var link: Link? = null
         try {
-            s.tcpNoDelay = true; s.soTimeout = 15_000 // the HELLO must come quickly
+            s.tcpNoDelay = true; s.soTimeout = HELLO_WAIT_MS // the HELLO must come quickly
             val out = DataOutputStream(BufferedOutputStream(s.getOutputStream()))
             val hello = HELLO + nodeId.toByteArray(Charsets.UTF_8)
             out.writeInt(hello.size); out.write(hello); out.flush()
@@ -128,12 +140,20 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
             val b = ByteArray(n).also(inp::readFully)
             if (!b.copyOf(HELLO.size).contentEquals(HELLO)) return
             val node = String(b, HELLO.size, n - HELLO.size, Charsets.UTF_8)
-            if (node == nodeId || links.size >= MAX_LINKS) return
+            if (node == nodeId) return
+            hello(node)
             s.soTimeout = 0
-            val l = Link(PREFIX + node + "#" + count.incrementAndGet(), node, s, out)
-            link = l
-            links[l.id] = l
-            byNode.put(node, l)?.let { old -> quiet(old.socket) } // a newer link replaces the old one (restarts)
+            val l = Link(PREFIX + node + "#" + count.incrementAndGet(), node, s, out, dialed)
+            synchronized(byNode) {
+                if (links.size >= MAX_LINKS) return
+                val old = byNode[node]
+                // spec "Restarts and duplicate links": both phones keep the same link
+                if (old != null && !DuplicateLinks.keepNew(nodeId, node, dialed, old.dialed, l.since - old.since)) return
+                link = l
+                links[l.id] = l
+                byNode[node] = l
+                old?.let { quiet(it.socket) }
+            }
             r.peerUp(l.id); changed()
             while (true) {
                 val m = inp.readInt()
@@ -153,7 +173,7 @@ class WifiLinks(private val nodeId: String, private val router: () -> MeshRouter
 
     fun statusLine(): String {
         val parts = ArrayList<String>()
-        parts += if (server != null) "${links.size} link(s)" else "off"
+        parts += if (server == null) "off" else when (links.size) { 0 -> "no phones yet"; 1 -> "1 phone linked"; else -> "${links.size} phones linked" }
         manual?.let { parts += "address $it" }
         if (note.isNotEmpty()) parts += note
         return "Wi-Fi network: " + parts.joinToString(" · ")

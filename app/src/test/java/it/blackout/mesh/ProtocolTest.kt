@@ -193,10 +193,10 @@ class ProtocolTest {
 
     @Test fun statusShareText() {
         val t = StatusShare.text(CheckIn.HELP, "Anna", 64, Spot(45.46420, 9.19000, 12))
-        assertEquals("🆘 I need help — Anna. Battery 64%. 45.46420, 9.19000 ±12 m https://osm.org/?mlat=45.46420&mlon=9.19000", t)
+        assertEquals("🆘 I need help — Anna. Battery 64%. 45.46420, 9.19000 ±12 m (8FQFF57R+M2) https://osm.org/?mlat=45.46420&mlon=9.19000", t)
         assertTrue(t.length <= 160)
         assertEquals("✅ I'm safe.", StatusShare.text(CheckIn.SAFE, " ", null, null))
-        assertEquals("✅ I'm safe — Ben. -33.86880, 151.20930 https://osm.org/?mlat=-33.86880&mlon=151.20930",
+        assertEquals("✅ I'm safe — Ben. -33.86880, 151.20930 (4RRH46J5+FP) https://osm.org/?mlat=-33.86880&mlon=151.20930",
             StatusShare.text(CheckIn.SAFE, "Ben", 101, Spot(-33.8688, 151.2093)))
         assertTrue(StatusShare.text(CheckIn.HELP, "x".repeat(60), 100, Spot(-89.99999, -179.99999, 99_999)).length <= 160)
     }

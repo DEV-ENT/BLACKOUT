@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.it.darkproof.mesh"],
+        "components": [
+          { "/": "/join", "comment": "Group invites. The invite itself is in the #fragment." },
+          { "/": "/join/" },
+          { "/": "/join.html" }
+        ]
+      }
+    ]
+  }
+}

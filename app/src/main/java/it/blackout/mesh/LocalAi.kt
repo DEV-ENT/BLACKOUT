@@ -66,7 +66,8 @@ object LocalAi {
 
     sealed class State {
         object Missing : State()
-        data class Downloading(val progress: Float) : State()
+        /** [waiting]: why it doesn't move right now ("No internet…"), or null while it downloads. */
+        data class Downloading(val progress: Float, val waiting: String? = null) : State()
         object Verifying : State()
         object Ready : State()
         data class Failed(val why: String) : State()
@@ -126,18 +127,31 @@ object LocalAi {
 
     // MARK: - Download
 
-    fun download(m: AiModel) {
-        if (states[m.id] is State.Downloading || states[m.id] == State.Verifying) return
+    /** The network now: "none", "metered" (mobile data or a paid hotspot) or "free" (usually Wi-Fi). */
+    fun network(c: Context): String {
+        val cm = c.getSystemService(android.net.ConnectivityManager::class.java) ?: return "free"
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+        if (!caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) return "none"
+        return if (cm.isActiveNetworkMetered) "metered" else "free"
+    }
+
+    /** Whether the model fits in the phone's free storage, with room to spare; else why not. */
+    fun spaceProblem(m: AiModel): String? {
         val free = StatFs(dir().path).availableBytes
-        if (free < m.bytes + 300_000_000) {
-            states[m.id] = State.Failed("Not enough storage: ${"%.1f".format(free / 1e9)} GB free, ${"%.1f".format((m.bytes + 300_000_000) / 1e9)} GB needed.")
-            return
-        }
+        return if (free >= m.bytes + 300_000_000) null
+            else "Not enough storage: ${"%.1f".format(free / 1e9)} GB free, ${"%.1f".format((m.bytes + 300_000_000) / 1e9)} GB needed. Free some space and try again."
+    }
+
+    /** [mobileData]: false waits for Wi-Fi (or another network that isn't metered). */
+    fun download(m: AiModel, mobileData: Boolean = true) {
+        if (states[m.id] is State.Downloading || states[m.id] == State.Verifying) return
+        spaceProblem(m)?.let { states[m.id] = State.Failed(it); return }
         part(m).delete()
         val id = try {
             app.getSystemService(DownloadManager::class.java).enqueue(
                 DownloadManager.Request(Uri.parse(m.url)).setTitle("DarkProof AI: ${m.title}")
                     .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                    .setAllowedOverMetered(mobileData).setAllowedOverRoaming(mobileData)
                     .setDestinationUri(Uri.fromFile(part(m))))
         } catch (e: Exception) { // e.g. no shared storage: DownloadManager can only write there
             states[m.id] = State.Failed("The download can't start on this phone (${e.message ?: "storage unavailable"})."); return
@@ -166,17 +180,26 @@ object LocalAi {
     private fun watch(m: AiModel) {
         val id = prefs.getLong("download.${m.id}", -1).takeIf { it >= 0 } ?: return
         val dm = app.getSystemService(DownloadManager::class.java)
-        val row = dm.query(DownloadManager.Query().setFilterById(id))?.use { q ->
+        val row = runCatching { dm.query(DownloadManager.Query().setFilterById(id))?.use { q ->
             if (!q.moveToFirst()) null else Triple(q.getInt(q.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
                 q.getLong(q.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
                 q.getInt(q.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)))
-        }
+        } }.getOrNull()
         when (row?.first) {
             null -> { prefs.edit().remove("download.${m.id}").apply(); states[m.id] = State.Failed("The download was cancelled.") }
             DownloadManager.STATUS_SUCCESSFUL -> { prefs.edit().remove("download.${m.id}").apply(); verify(m) }
             DownloadManager.STATUS_FAILED -> { prefs.edit().remove("download.${m.id}").apply(); part(m).delete()
-                states[m.id] = State.Failed("The download failed (error ${row.third}). Try again with a steady connection.") }
-            else -> { states[m.id] = State.Downloading((row.second.toFloat() / m.bytes).coerceIn(0f, 0.99f)); main.postDelayed({ watch(m) }, 1000) }
+                states[m.id] = State.Failed("The download failed. Try again with a steady connection.") }
+            else -> {
+                val waiting = when {
+                    row.first == DownloadManager.STATUS_PAUSED && row.third == DownloadManager.PAUSED_QUEUED_FOR_WIFI -> "Waiting for Wi-Fi."
+                    row.first == DownloadManager.STATUS_PAUSED && row.third == DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "No internet right now. It goes on by itself when there is some."
+                    row.first == DownloadManager.STATUS_PAUSED && row.third == DownloadManager.PAUSED_WAITING_TO_RETRY -> "The connection dropped. Trying again…"
+                    row.first == DownloadManager.STATUS_PENDING && network(app) == "none" -> "No internet right now. It starts by itself when there is some."
+                    else -> null
+                }
+                states[m.id] = State.Downloading((row.second.toFloat() / m.bytes).coerceIn(0f, 0.99f), waiting); main.postDelayed({ watch(m) }, 1000)
+            }
         }
     }
 

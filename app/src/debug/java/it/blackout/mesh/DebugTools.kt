@@ -45,6 +45,35 @@ object DebugTools {
     }
 
     private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * A message from another phone, through the real receive path (alerts, banners, people): --es fake help | ask |
+     * askme | vouch | safe | text | other (to another saved group) | history (messages 1 and 2 days old, an old place).
+     */
+    private fun fake(c: Context, kind: String) {
+        val g = Groups.current(c) ?: return
+        val me = c.getSharedPreferences("mesh", 0).getString("name", "") ?: ""
+        val now = System.currentTimeMillis()
+        fun put(code: String, text: String, ts: Long = now, from: String = "Marco", sender: String = "debug-marco") {
+            val cr = GroupCrypto(code); val id = Packet.newId(cr.mailbox)
+            MeshEngine.router?.receive("debug", Packet(id, ts, 16, cr.seal(id, ts, sender, from, text)))
+        }
+        when (kind) {
+            "help" -> put(g.code, CheckIn.HELP.text(41, Spot(45.464, 9.189, 10), setOf(Need.INJURED, Need.WATER), 3))
+            "safe" -> put(g.code, CheckIn.SAFE.text(77, Spot(45.4655, 9.1905, 12)), from = "Lucia", sender = "debug-lucia")
+            "ask" -> put(g.code, AreYouSafe().text)
+            "askme" -> put(g.code, AreYouSafe(me).text)
+            "vouch" -> put(g.code, Vouch("Grandma Rosa", CheckIn.HELP, setOf(Need.MEDICINE), 2, Spot(45.4662, 9.1931)).text)
+            "text" -> put(g.code, "Water is back at the school gym")
+            "other" -> Groups.others(c).firstOrNull()?.let { put(it.code, "Hello from ${it.name}", from = "Sara", sender = "debug-sara") }
+            "history" -> {
+                put(g.code, "Power is out in the whole street", now - 2 * 86_400_000L)
+                put(g.code, "Shop on the corner still has bread", now - 86_400_000L - 3_600_000L, "Lucia", "debug-lucia")
+                put(GroupCrypto.PUBLIC_CODE, Place(PlaceKind.WATER, "Fountain in the park", Spot(45.467, 9.195)).text, now - 30 * 3_600_000L, "Paolo", "debug-paolo")
+            }
+        }
+        log("fake message: $kind")
+    }
     private fun whenStarted(f: () -> Unit) { if (MeshEngine.router != null) f() else main.postDelayed({ whenStarted(f) }, 500) }
 
     /**
@@ -54,6 +83,14 @@ object DebugTools {
      * Simulator: adb forward tcp:7777 tcp:7777, then type 127.0.0.1:7777 in the iPhone's Wi-Fi network address field.
      */
     fun debugIntent(c: Context, i: Intent) {
+        // --es internet 0: no public relays (tests). Read by MeshEngine.start; relinks if already up.
+        i.getStringExtra("internet")?.let { v ->
+            c.getSharedPreferences("mesh", 0).edit().putBoolean("internet", v == "1").commit()
+            if (MeshEngine.router != null) MeshEngine.setInternet(v == "1")
+        }
+        // --es fakeIn 5: arrives 5 s later, e.g. after pressing Home (notifications instead of banners).
+        val delay = (i.getStringExtra("fakeIn")?.toLongOrNull() ?: 0L) * 1000
+        i.getStringExtra("fake")?.let { k -> main.postDelayed({ whenStarted { Thread { fake(c, k) }.start() } }, delay) }
         i.getStringExtra("tor")?.let { Tor.setEnabled(c, it == "1"); if (MeshEngine.nostr != null) MeshEngine.setTor(it == "1") } // relink if already up
         i.getStringExtra("join")?.let { j ->
             c.getSharedPreferences("mesh", 0).edit().putString("name", j.substringBefore('|')).putString("code", j.substringAfter('|')).apply()

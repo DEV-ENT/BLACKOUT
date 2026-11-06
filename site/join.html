@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- connect-src 'none': this page can't send anything anywhere, so the invite in the #fragment stays in the browser. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Join a group on DarkProof</title>
+<meta name="description" content="You were invited to a DarkProof group. DarkProof is a free messaging app that works without internet.">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+<script src="join.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+<header class="site">
+  <img src="logo.png" alt="" width="40" height="40">
+  <a href="./">DarkProof</a>
+</header>
+
+<main id="main">
+  <section class="invite" aria-labelledby="title">
+    <p class="dim" id="kicker">You're invited to a DarkProof group</p>
+    <h1 id="title">Join the group</h1>
+    <div id="ok" hidden>
+      <p>DarkProof is a free messaging app that keeps working without internet. Open this invite in the app to join.</p>
+      <div class="buttons">
+        <a class="button primary" id="open" href="darkproof://join">Open in DarkProof</a>
+        <button class="button" id="copy" type="button">Copy invite</button>
+      </div>
+      <p class="dim" id="copied" role="status" aria-live="polite"></p>
+      <p class="dim">Nothing happens? Install DarkProof below, then come back and tap “Open in DarkProof”, or copy the
+      invite and paste it in the app under “Join a group”.</p>
+    </div>
+    <div id="bad" hidden>
+      <p>This invite link is incomplete. Ask whoever sent it for a new one, or for the group code.</p>
+    </div>
+    <noscript>
+      <p>To read this invite, turn on JavaScript for this page. It stays on your phone: the page sends nothing anywhere.</p>
+    </noscript>
+  </section>
+
+  <h2 id="download">Get DarkProof</h2>
+  <div class="buttons">
+    <a class="button primary" href="https://apps.apple.com/app/idAPP_STORE_ID">App Store (iPhone)</a>
+    <a class="button primary" href="https://play.google.com/store/apps/details?id=it.darkproof.mesh">Google Play (Android)</a>
+  </div>
+  <p class="note">No internet? Ask a friend who has DarkProof on Android to share the app with you over Quick Share.
+  It works phone to phone, without a network.</p>
+  <p class="dim">The invite (everything after “#” in this page's address) never reaches this website or anyone else:
+  browsers don't send it, and this page has no trackers. Anyone who has the invite can read the group's messages, so
+  share it only with people you trust.</p>
+</main>
+
+<footer class="site">
+  <nav aria-label="Footer">
+    <a href="./">About DarkProof</a>
+    <a href="privacy.html">Privacy policy</a>
+    <a href="mailto:support@darkproof.app">support@darkproof.app</a>
+  </nav>
+</footer>
+</div>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Network
 import os
 import UIKit
 import BlackoutCore
@@ -101,7 +102,7 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
         anything that is not in it:
         """
 
-    enum State: Equatable { case missing, downloading(Double), verifying, ready, failed(String) }
+    enum State: Equatable { case missing, downloading(Double), paused(Double), verifying, ready, failed(String) }
 
     struct Turn: Codable, Equatable, Identifiable {
         var id = UUID()
@@ -114,6 +115,12 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published private(set) var selectedId: String
     @Published private(set) var conversation: [Turn] = []
     @Published private(set) var busy = false
+    /// The phone is on mobile data (or another link marked expensive), so a big download costs the user.
+    @Published private(set) var onMobileData = false
+    private let path = NWPathMonitor()
+    private var task: URLSessionDownloadTask?
+    private var resumeData: [String: Data] = [:] // model id -> where a cancelled or broken download can go on
+    private var pausing = false                  // main thread: the cancel was the user's (Cancel), not a failure
 
     private let work = DispatchQueue(label: "ai")
     private var downloadingId: String?
@@ -157,6 +164,11 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
             self?.stopRequested = true
         }
+        path.pathUpdateHandler = { [weak self] p in
+            let expensive = p.isExpensive || p.usesInterfaceType(.cellular)
+            DispatchQueue.main.async { self?.onMobileData = expensive }
+        }
+        path.start(queue: DispatchQueue(label: "ai-path"))
     }
 
     // MARK: - Choosing, downloading and deleting models
@@ -166,22 +178,42 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
         UserDefaults.standard.set(m.id, forKey: "aiModel")
     }
 
+    /// Starts, or goes on with, a download. The screen stays on meanwhile (iOS pauses downloads of apps that leave
+    /// the screen for long); Cancel keeps what was downloaded so far. Main thread.
     func download(_ m: AiModel) {
         guard downloadingId == nil, states[m.id] != .ready else { return }
         downloadingId = m.id
-        states[m.id] = .downloading(0)
-        let task = URLSession(configuration: .default, delegate: self, delegateQueue: nil).downloadTask(with: m.url)
-        task.taskDescription = m.id
-        task.resume()
+        let done: Double = { if case .paused(let p) = states[m.id] { return p }; return 0 }()
+        states[m.id] = .downloading(done)
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let t = resumeData.removeValue(forKey: m.id).map { session.downloadTask(withResumeData: $0) } ?? session.downloadTask(with: m.url)
+        t.taskDescription = m.id
+        task = t
+        UIApplication.shared.isIdleTimerDisabled = true
+        t.resume()
     }
 
+    /// Stops the download; "Resume" goes on from there. Main thread.
+    func cancelDownload(_ m: AiModel) {
+        guard downloadingId == m.id, let t = task else { return }
+        pausing = true
+        let p: Double = { if case .downloading(let p) = states[m.id] { return p }; return 0 }()
+        states[m.id] = .paused(p)
+        t.cancel(byProducingResumeData: { [weak self] data in DispatchQueue.main.async { if let data { self?.resumeData[m.id] = data } } })
+    }
+
+    /// Whether a stopped or broken download can go on where it was.
+    func canResume(_ m: AiModel) -> Bool { resumeData[m.id] != nil }
+
+    /// Deletes a model. If it was the one in use, another downloaded model takes its place. Main thread.
     func delete(_ m: AiModel) {
+        if selectedId == m.id, let other = Self.catalog.first(where: { $0.id != m.id && states[$0.id] == .ready }) { select(other) }
+        states[m.id] = .missing
         work.async {
             #if canImport(llama)
             if self.engineId == m.id { self.engine = nil; self.engineId = nil } // free the memory first
             #endif
             try? FileManager.default.removeItem(at: Self.path(m))
-            DispatchQueue.main.async { self.states[m.id] = .missing }
         }
     }
 
@@ -191,7 +223,7 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
                     totalBytesExpectedToWrite _: Int64) {
         guard let m = model(of: downloadTask) else { return }
         let p = min(Double(totalBytesWritten) / Double(m.bytes), 1)
-        DispatchQueue.main.async { self.states[m.id] = .downloading(p) }
+        DispatchQueue.main.async { if case .downloading = self.states[m.id] { self.states[m.id] = .downloading(p) } }
     }
 
     func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
@@ -216,14 +248,38 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error, let m = model(of: task) { finish(m, .failed(error.localizedDescription)) }
+        if let error, let m = model(of: task) {
+            let data = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+            DispatchQueue.main.async {
+                if let data { self.resumeData[m.id] = data }
+                if self.pausing { // Cancel: keep the paused state
+                    self.pausing = false; self.downloadingId = nil; self.task = nil
+                    UIApplication.shared.isIdleTimerDisabled = false
+                } else {
+                    self.finish(m, .failed(Self.reason(error)))
+                }
+            }
+        }
         s.finishTasksAndInvalidate()
+    }
+
+    /// Why a download stopped, in a few plain words.
+    private static func reason(_ e: Error) -> String {
+        switch (e as? URLError)?.code {
+        case .notConnectedToInternet?, .networkConnectionLost?: return "the internet connection was lost"
+        case .timedOut?: return "the connection was too slow"
+        case .cannotWriteToFile?: return "not enough free space on this iPhone"
+        default: return e.localizedDescription
+        }
     }
 
     private func finish(_ m: AiModel, _ s: State) {
         DispatchQueue.main.async {
             self.states[m.id] = s
             self.downloadingId = nil
+            self.task = nil
+            UIApplication.shared.isIdleTimerDisabled = false
+            if s == .ready { self.resumeData[m.id] = nil }
             if s == .ready && !self.selectedReady { self.select(m) } // first model installed: use it
         }
     }

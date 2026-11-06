@@ -45,6 +45,68 @@ object BleProtocol {
         return a.size - b.size
     }
 
+    /** A link whose other side sends no HELLO this long after the link opened is closed (spec "Limits"). */
+    const val HELLO_WAIT_MS = 10_000L
+    /** A central link still being set up this long after dialing is closed. */
+    const val SETUP_WAIT_MS = 30_000L
+    /** Re-sync and HELLO answers to a repeated HELLO, at most once per this per link (spec "Restarts"). */
+    const val REPEAT_MS = 60_000L
+
+    /**
+     * A repeated HELLO with the same node id (spec "Restarts"): whether to answer with HELLO, and whether to send the
+     * link every stored packet again. Each at most once a minute; the re-sync only when the link's queue is empty.
+     * The first repeat is always answered, so a restarted app learns who it is linked to.
+     */
+    class HelloGate {
+        private var answeredAt = Long.MIN_VALUE / 2
+        private var resyncedAt = Long.MIN_VALUE / 2
+        fun repeated(nowMs: Long, queueEmpty: Boolean): Pair<Boolean, Boolean> {
+            val answer = nowMs - answeredAt >= REPEAT_MS
+            if (answer) answeredAt = nowMs
+            val resync = queueEmpty && nowMs - resyncedAt >= REPEAT_MS
+            if (resync) resyncedAt = nowMs
+            return answer to resync
+        }
+    }
+
+    /**
+     * Frames waiting to go out on one link, cut into chunks as they are sent. Over [maxBytes] or [maxFrames], the
+     * oldest PACKET frames not yet started are dropped (the neighbour gets stored packets again on its next link);
+     * HELLO frames are never dropped.
+     */
+    class Outbox(private val maxBytes: Int = MAX_QUEUE_BYTES, private val maxFrames: Int = MAX_QUEUE_FRAMES) {
+        private val frames = ArrayDeque<Pair<ByteArray, Boolean>>() // frame, is HELLO
+        private var pos = 0          // bytes of the first frame already sent
+        private var peeked = 0       // length of the chunk handed out by peek()
+        var bytes = 0; private set
+        val isEmpty get() = frames.isEmpty()
+        val count get() = frames.size
+
+        fun add(frame: ByteArray, hello: Boolean = false) {
+            frames.addLast(frame to hello); bytes += frame.size
+            while (bytes > maxBytes || frames.size > maxFrames) {
+                // the first frame may be half sent: never cut a frame in the middle of the stream
+                val i = ((if (pos > 0 || peeked > 0) 1 else 0) until frames.size).firstOrNull { !frames[it].second } ?: break
+                bytes -= frames.removeAt(i).first.size
+            }
+        }
+        /** The next chunk of at most [size] bytes, without taking it: call [commit] once it went out. */
+        fun peek(size: Int): ByteArray? {
+            val f = frames.firstOrNull()?.first ?: return null
+            val end = minOf(pos + size, f.size)
+            peeked = end - pos
+            return f.copyOfRange(pos, end)
+        }
+        fun commit() {
+            val f = frames.firstOrNull()?.first ?: return
+            pos += peeked; peeked = 0
+            if (pos >= f.size) { frames.removeFirst(); bytes -= f.size; pos = 0 }
+        }
+        fun clear() { frames.clear(); bytes = 0; pos = 0; peeked = 0 }
+    }
+    const val MAX_QUEUE_BYTES = 1 shl 20  // 1 MiB: about a minute of Bluetooth LE
+    const val MAX_QUEUE_FRAMES = 1_000
+
     /** Rebuilds frames from chunks. Throws IllegalArgumentException on a malformed stream: the caller disconnects. */
     class Reader {
         private val buf = ByteArrayOutputStream()

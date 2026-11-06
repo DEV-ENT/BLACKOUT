@@ -14,10 +14,30 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/> <!-- restart the mesh after the phone restarts -->
+    <uses-permission android:name="android.permission.VIBRATE"/> <!-- help alerts while the app is open -->
     <application android:label="DarkProof" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.NoActionBar" android:largeHeap="true">
         <uses-native-library android:name="libOpenCL.so" android:required="false"/>
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:windowSoftInputMode="adjustResize">
+        <!-- The QR scanner (Join) comes with the app from Google Play, so it works offline later. -->
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/>
+        <!-- configChanges: rotating the phone or changing the theme keeps sheets, drafts and forms (Compose redraws). -->
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
+            <!-- App shortcuts, tiles and notifications (Quick.kt) -->
+            <intent-filter>
+                <action android:name="it.darkproof.mesh.action.SAFE"/><action android:name="it.darkproof.mesh.action.HELP"/>
+                <action android:name="it.darkproof.mesh.action.CHAT"/><category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <!-- Web invites: https://darkproof.app/join#name=…&code=… (App Links, once darkproof.app serves assetlinks.json) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/><data android:scheme="http"/>
+                <data android:host="darkproof.app"/><data android:host="www.darkproof.app"/>
+                <data android:pathPrefix="/join"/>
+            </intent-filter>
             <!-- Group invites: darkproof://join?name=…&code=… (same links as the iPhone app) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -26,6 +46,19 @@
             </intent-filter>
         </activity>
         <service android:name=".MeshService" android:exported="false" android:foregroundServiceType="connectedDevice"/>
+        <receiver android:name=".AnswerReceiver" android:exported="false"/>
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter>
+        </receiver>
+        <service android:name=".SafeTile" android:exported="true" android:label="@string/tile_safe" android:icon="@drawable/ic_verified_user"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
+        </service>
+        <service android:name=".HelpTile" android:exported="true" android:label="@string/tile_help" android:icon="@drawable/ic_sos"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
+        </service>
         <!-- Serves this app's APK read-only so it can be shared offline (ApkShare.kt). -->
         <provider android:name=".ApkProvider" android:authorities="it.darkproof.mesh.apk" android:exported="false" android:grantUriPermissions="true"/>
     </application>

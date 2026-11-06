@@ -163,9 +163,13 @@ object OfflineMap {
 /** A pin on the map: a place, a person, or me. */
 data class Pin(val title: String, val spot: Spot, val ts: Long, val color: String)
 
-/** The street map with pins. Tapping a pin opens the compass to it. */
+/**
+ * The street map with pins. Tapping a pin opens the compass to it. [onCenter] gets the middle of the map after each
+ * move, or null while the map shows too large an area to save (zoomed out).
+ */
 @Composable
-fun StreetMap(pins: List<Pin>, me: Spot?, modifier: Modifier, open: (Sheet) -> Unit) {
+fun StreetMap(pins: List<Pin>, me: Spot?, modifier: Modifier, open: (Sheet) -> Unit, onCenter: (Spot?) -> Unit = {}) {
+    val centerNow by rememberUpdatedState(onCenter)
     val ctx = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -181,6 +185,10 @@ fun StreetMap(pins: List<Pin>, me: Spot?, modifier: Modifier, open: (Sheet) -> U
                         PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
                         PropertyFactory.circleStrokeColor("#000000"), PropertyFactory.circleStrokeWidth(2.5f)))
                     map = m
+                }
+                m.addOnCameraIdleListener {
+                    val cp = m.cameraPosition
+                    centerNow(cp.target?.takeIf { cp.zoom >= 9 }?.let { t -> Spot(t.latitude, t.longitude) })
                 }
                 m.addOnMapClickListener { ll ->
                     val f = m.queryRenderedFeatures(m.projection.toScreenLocation(ll), "pins").firstOrNull() ?: return@addOnMapClickListener false
@@ -218,16 +226,22 @@ fun StreetMap(pins: List<Pin>, me: Spot?, modifier: Modifier, open: (Sheet) -> U
     AndroidView({ view }, modifier.clip(RoundedCornerShape(24.dp)))
 }
 
-/** Save, update or delete the offline map, like the iPhone's OfflineMapCard. */
+/**
+ * Save, update or delete the offline map, like the iPhone's OfflineMapCard. Saves around [me], or without a position
+ * fix around [center], the middle of the map on screen (move the map to choose the area).
+ */
 @Composable
-fun OfflineMapCard(me: Spot?) {
+fun OfflineMapCard(me: Spot?, center: Spot? = null) {
     val ctx = LocalContext.current
+    val around = me ?: center
+    val where = if (me != null) "around you" else "around the middle of the map"
     Card {
         when (val s = OfflineMap.state) {
             OfflineMap.State.None -> {
                 Txt("Save this map for the blackout", 18, FontWeight.Bold)
-                Txt("Downloads the streets about 10 km around you (up to 50 MB) while you still have internet. Then the map works with none.", 15, color = Theme.dim)
-                PrimaryButton(if (me == null) "Finding your position…" else "Download map", enabled = me != null, icon = R.drawable.ic_download) { me?.let { OfflineMap.download(ctx, it) } }
+                Txt("Downloads the streets about 10 km $where (up to 50 MB) while you still have internet. Then the map works with none." +
+                    if (me == null) " Zoom the map in on your area first." else "", 15, color = Theme.dim)
+                PrimaryButton(if (around == null) "Zoom in on your area" else "Download map", enabled = around != null, icon = R.drawable.ic_download) { around?.let { OfflineMap.download(ctx, it) } }
             }
             is OfflineMap.State.Downloading -> {
                 Txt("Saving the map… ${(s.progress * 100).toInt()}%", 18, FontWeight.Bold)
@@ -241,14 +255,14 @@ fun OfflineMapCard(me: Spot?) {
                 Txt("Map saved", 18, FontWeight.Bold, Theme.safe)
                 Txt("About 10 km around where you saved it, ${ago(s.ts)} · ${"%.1f".format(s.bytes / 1_000_000.0)} MB. It works with no internet.", 15, color = Theme.dim)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (me != null) GhostButton("Save around me again") { OfflineMap.download(ctx, me) }
+                    if (around != null) GhostButton(if (me != null) "Save around me again" else "Save this area instead") { OfflineMap.download(ctx, around) }
                     GhostButton("Delete") { OfflineMap.delete(ctx) }
                 }
             }
             is OfflineMap.State.Failed -> {
                 Txt("The map wasn't saved", 18, FontWeight.Bold, Theme.help)
                 Txt(s.why, 15, color = Theme.dim)
-                GhostButton("Try again", enabled = me != null) { me?.let { OfflineMap.download(ctx, it) } }
+                GhostButton("Try again", enabled = around != null) { around?.let { OfflineMap.download(ctx, it) } }
             }
         }
     }

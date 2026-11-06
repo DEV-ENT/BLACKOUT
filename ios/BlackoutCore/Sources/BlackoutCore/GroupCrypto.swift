@@ -12,10 +12,13 @@ public struct Message: Equatable, Sendable {
     public let isPublic: Bool
     /// A small JPEG photo (spec/FORMAT.md, "Photos"), or nil.
     public let photo: Data?
+    /// The code of the saved group whose key opened it (nil for Public messages). Not sent on the wire.
+    public var group: String?
 
-    public init(id: String, ts: Int64, sender: String, name: String, text: String, isPublic: Bool = false, photo: Data? = nil) {
+    public init(id: String, ts: Int64, sender: String, name: String, text: String, isPublic: Bool = false, photo: Data? = nil,
+                group: String? = nil) {
         self.id = id; self.ts = ts; self.sender = sender; self.name = name; self.text = text; self.isPublic = isPublic
-        self.photo = photo
+        self.photo = photo; self.group = group
     }
 }
 

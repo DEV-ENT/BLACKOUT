@@ -74,6 +74,18 @@ class WifiLinksTest {
         waitFor("delivery") { a.got.any { it.id == sent.id } }
     }
 
+    /** Both phones dial each other at once (e.g. both typed the other's address): both keep the link "node-a" dialed. */
+    @Test fun dialingEachOtherAtOnceLeavesOneLink() {
+        val a = node("group-code", "node-a"); val b = node("group-code", "node-b")
+        val pa = a.wifi.listen(0); val pb = b.wifi.listen(0)
+        a.wifi.dial("127.0.0.1", pb); b.wifi.dial("127.0.0.1", pa)
+        waitFor("one link each") { a.wifi.linkCount() == 1 && b.wifi.linkCount() == 1 && a.router.peerCount() == 1 && b.router.peerCount() == 1 }
+        Thread.sleep(500)
+        assertEquals(1, a.wifi.linkCount()); assertEquals(1, b.wifi.linkCount())
+        val sent = b.say("over the one link left")
+        waitFor("delivery") { a.got.any { it.id == sent.id } }
+    }
+
     @Test fun linksWithoutHelloOrToItselfAreClosed() {
         val a = node("group-code", "node-a")
         val port = a.wifi.listen(0)

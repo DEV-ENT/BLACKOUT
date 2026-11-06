@@ -83,4 +83,79 @@ class CoreTest {
         r.receive("peer", Packet("00000000000000b2", System.currentTimeMillis(), 16, byteArrayOf(1)))
         assertEquals(listOf("00000000000000b2"), got)
     }
+    // ---- spec "Forwarding rules": timestamps and ttl (same vectors as the iPhone's CoreTests) ----
+
+    @Test fun packetsFromTheFutureAreDropped() {
+        val t = 1_800_000_000_000L; val got = mutableListOf<String>()
+        val r = MeshRouter({ _, _ -> }, { got += it.id }, now = { t })
+        r.receive("p", Packet("00000000000000c1", t + MeshRouter.MAX_FUTURE_MS + 1, 16, byteArrayOf(1)))
+        r.receive("p", Packet("00000000000000c2", t + MeshRouter.MAX_FUTURE_MS, 16, byteArrayOf(1)))
+        assertEquals(listOf("00000000000000c2"), got)
+        val sent = mutableListOf<String>()
+        val r2 = MeshRouter({ _, p -> sent += p.id }, { }, now = { t })
+        r2.restore(listOf(Packet("00000000000000c3", t + 3_600_000, 16, byteArrayOf(1)), Packet("00000000000000c4", t, 16, byteArrayOf(1))))
+        r2.peerUp("x")
+        assertEquals(listOf("00000000000000c4"), sent) // the forged future packet is not kept
+    }
+
+    @Test fun ttlAbove16IsLowered() {
+        val delivered = mutableListOf<Int>(); val forwarded = mutableListOf<Int>()
+        val r = MeshRouter({ _, p -> forwarded += p.ttl }, { delivered += it.ttl })
+        r.peerUp("a"); r.peerUp("b")
+        r.receive("a", Packet("00000000000000d1", System.currentTimeMillis(), 64, byteArrayOf(1)))
+        assertEquals(listOf(16), delivered)    // stored with 16
+        assertEquals(listOf(15), forwarded)    // and passed on with 15
+        val sent = mutableListOf<Int>()
+        val r2 = MeshRouter({ _, p -> sent += p.ttl }, { })
+        r2.restore(listOf(Packet("00000000000000d2", System.currentTimeMillis(), 40, byteArrayOf(1)))); r2.peerUp("x")
+        assertEquals(listOf(15), sent)
+    }
+
+    @Test fun restoreSendsNewPacketsToPeersAlreadyLinked() {
+        val sent = mutableListOf<String>()
+        val r = MeshRouter({ _, p -> sent += p.id }, { })
+        r.peerUp("x")
+        r.restore(listOf(Packet("00000000000000e1", System.currentTimeMillis(), 16, byteArrayOf(1))))
+        assertEquals(listOf("00000000000000e1"), sent)
+    }
+
+    // ---- spec "Storage": the store cap ----
+
+    @Test fun storeCapDropsUnreadableThenPublicThenGroup() {
+        val e = listOf(
+            StoreCap.Entry("g1", 1, 100, StoreCap.Kind.GROUP), StoreCap.Entry("p1", 2, 100, StoreCap.Kind.PUBLIC),
+            StoreCap.Entry("u2", 5, 100, StoreCap.Kind.UNREADABLE), StoreCap.Entry("u1", 3, 100, StoreCap.Kind.UNREADABLE),
+            StoreCap.Entry("p2", 4, 100, StoreCap.Kind.PUBLIC), StoreCap.Entry("g2", 6, 100, StoreCap.Kind.GROUP))
+        assertEquals(emptyList<String>(), StoreCap.overflow(e, maxBytes = 600, maxCount = 6))
+        assertEquals(listOf("u1", "u2", "p1"), StoreCap.overflow(e, maxBytes = 300, maxCount = 6))
+        assertEquals(listOf("u1", "u2", "p1", "p2", "g1"), StoreCap.overflow(e, maxBytes = 10_000, maxCount = 1))
+        assertEquals(listOf("u1"), StoreCap.overflow(e, maxBytes = 550, maxCount = 6))
+    }
+
+    // ---- spec "Wi-Fi networks": duplicate links ----
+
+    @Test fun duplicateLinkRuleIsTheSameOnBothPhones() {
+        val a = "259b6c4d-e98"; val b = "7c0d995b-2c4" // a < b
+        // Both dialed at about the same time: both keep the link a dialed.
+        assertFalse(DuplicateLinks.keepNew(a, b, newDialedByMe = false, oldDialedByMe = true, oldAgeMs = 500))  // at a: new = b's
+        assertTrue(DuplicateLinks.keepNew(b, a, newDialedByMe = false, oldDialedByMe = true, oldAgeMs = 500))   // at b: new = a's
+        assertTrue(DuplicateLinks.keepNew(a, b, newDialedByMe = true, oldDialedByMe = false, oldAgeMs = 500))   // at a: new = a's
+        assertFalse(DuplicateLinks.keepNew(b, a, newDialedByMe = true, oldDialedByMe = false, oldAgeMs = 500))  // at b: new = b's
+        // The same phone dialed again (a restart), or the old link is older: the new one replaces it.
+        assertTrue(DuplicateLinks.keepNew(a, b, newDialedByMe = false, oldDialedByMe = false, oldAgeMs = 500))
+        assertTrue(DuplicateLinks.keepNew(a, b, newDialedByMe = false, oldDialedByMe = true, oldAgeMs = 10_000))
+    }
+
+    @Test fun recentIdsForgetTheOldest() {
+        val r = RecentIds(3, listOf("a", "b"))
+        assertTrue(r.add("c")); assertFalse(r.add("a")); assertTrue(r.add("d"))
+        assertEquals(listOf("b", "c", "d"), r.toList()); assertFalse("a" in r)
+    }
+
+    @Test fun receiptsWaitForAQuietMomentButNotLong() {
+        assertFalse(ReceiptBatch.due(firstMs = 0, lastMs = 0, nowMs = 1_999))
+        assertTrue(ReceiptBatch.due(firstMs = 0, lastMs = 0, nowMs = 2_000))
+        assertFalse(ReceiptBatch.due(firstMs = 0, lastMs = 9_000, nowMs = 9_999))  // still arriving
+        assertTrue(ReceiptBatch.due(firstMs = 0, lastMs = 9_500, nowMs = 10_000))  // but at most 10 s
+    }
 }

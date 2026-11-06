@@ -11,11 +11,30 @@ public enum PlaceKind: String, CaseIterable, Sendable {
     public var word: String { String(rawValue.split(separator: " ", maxSplits: 1)[1]) }
 }
 
+/// How current a shared place is (Place.freshness).
+public enum Freshness: Sendable {
+    /// Shared in the last 24 hours (or by a phone whose clock is ahead).
+    case fresh
+    /// Older than 24 hours: shown greyed.
+    case old
+    /// Older than 7 days: hidden.
+    case expired
+}
+
 /// A place someone shared on the Public channel: water, shelter, charging or medical help, usually with a position.
 /// It is an ordinary Public message, so apps that don't know places (and the Wi-Fi board) show it as text:
 /// "💧 Water: tap at the school gym · 📍 45.46420,9.19000 ±12m".
 public struct Place: Equatable, Sendable {
     public static let maxNote = 200
+    public static let oldAfterMs: Int64 = 24 * 3_600_000
+    public static let expiredAfterMs: Int64 = 7 * 24 * 3_600_000
+
+    /// How current a place shared at `ts` (ms since 1970) is at `now`, so both apps grey and hide places alike.
+    public static func freshness(ts: Int64, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> Freshness {
+        if now - ts > expiredAfterMs { return .expired }
+        if now - ts > oldAfterMs { return .old }
+        return .fresh
+    }
     public let kind: PlaceKind
     public let note: String
     public let spot: Spot?

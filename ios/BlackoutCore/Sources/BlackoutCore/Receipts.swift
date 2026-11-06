@@ -50,3 +50,13 @@ public struct Deliveries: Equatable, Sendable {
         }
     }
 }
+
+/// When the next delivery receipt goes out (spec/FORMAT.md, "Delivery receipts"): 2 s after the last message to confirm
+/// arrived, or 10 s after the first one, so a burst of arriving messages shares one receipt. Same as Android's.
+public enum ReceiptBatch {
+    public static let quietMs: Int64 = 2_000
+    public static let maxWaitMs: Int64 = 10_000
+    public static func due(firstMs: Int64, lastMs: Int64, nowMs: Int64) -> Bool {
+        nowMs - lastMs >= quietMs || nowMs - firstMs >= maxWaitMs
+    }
+}

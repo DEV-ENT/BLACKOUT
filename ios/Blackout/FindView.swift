@@ -16,7 +16,8 @@ struct FindSheet: View {
 
     init(person: Person) {
         title = "Find \(person.name)"; name = person.name; target = person.spot ?? Spot(lat: 0, lon: 0); ts = person.spotTs
-        detail = { "Where \(person.name) checked in \($0)" }
+        detail = person.isReport ? { "Where \(person.reportedBy ?? "someone") said \(person.name) was, \($0)" }
+                                 : { "Where \(person.name) checked in \($0)" }
         chip = person.checkIn.map { ($0.label, $0.color) }; tint = person.checkIn?.color ?? Theme.text
     }
 
@@ -44,21 +45,21 @@ struct FindSheet: View {
                 let d = Geo.distance(me, target), b = Geo.bearing(me, target)
                 let fuzz = Double((me.accuracy ?? 0) + (target.accuracy ?? 0))
                 if d <= max(15, fuzz) {
-                    Text("Very close").font(.system(size: 44, weight: .heavy)).foregroundStyle(Theme.text)
+                    Text("Very close").scaledFont(44, .heavy).foregroundStyle(Theme.text)
                     Text("Within about \(Self.meters(max(15, fuzz))). Look around or call out.")
-                        .font(.system(size: 16)).foregroundStyle(Theme.dim).multilineTextAlignment(.center)
+                        .scaledFont(16).foregroundStyle(Theme.dim).multilineTextAlignment(.center)
                 } else {
-                    Text(Self.meters(d)).font(.system(size: 56, weight: .heavy)).tracking(-1).foregroundStyle(Theme.text)
-                    Text("\(Geo.compassWord(b)) of you").font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.dim)
+                    Text(Self.meters(d)).scaledFont(56, .heavy).tracking(-1).foregroundStyle(Theme.text)
+                    Text("\(Geo.compassWord(b)) of you").scaledFont(17, .semibold).foregroundStyle(Theme.dim)
                 }
             } else if loc.denied {
-                Text("Allow location to see how far").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                Text("Allow location to see how far").scaledFont(20, .bold).foregroundStyle(Theme.text)
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
                 .buttonStyle(GhostButton())
             } else {
-                Text("Finding your position…").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.dim)
+                Text("Finding your position…").scaledFont(20, .bold).foregroundStyle(Theme.dim)
             }
         }
         .frame(maxWidth: .infinity)
@@ -66,12 +67,13 @@ struct FindSheet: View {
 
         Card {
             HStack(alignment: .firstTextBaseline) {
-                Text(name).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
+                Text(name).scaledFont(18, .bold).foregroundStyle(Theme.text)
                 Spacer()
                 if let chip { Chip(chip.0, chip.1) }
             }
             Text(detail(ago(ts, now)) + (target.accuracy.map { ", within about \(Self.meters(Double($0)))" } ?? "") + ".")
-                .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                .scaledFont(15).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            PlusCodeLabel(spot: target)
             if loc.heading == nil && me != nil {
                 Text("This phone has no compass right now, so the arrow assumes the top of the phone points north.")
                     .font(.footnote).foregroundStyle(Theme.faint)
@@ -88,11 +90,7 @@ struct FindSheet: View {
         return ZStack {
             Circle().fill(Theme.card)
             Circle().stroke(Theme.line, lineWidth: 2).padding(14)
-            Image(systemName: "location.north.fill")
-                .font(.system(size: 96, weight: .bold))
-                .foregroundStyle(me == nil ? Theme.faint : tint)
-                .rotationEffect(.degrees(angle))
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: angle)
+            CompassArrow(angle: angle, color: me == nil ? Theme.decor : tint)
         }
         .frame(width: 240, height: 240)
         .accessibilityElement()
@@ -111,5 +109,27 @@ struct FindSheet: View {
         if d < 1000 { return "\(Int((d / 10).rounded() * 10)) m" }
         if d < 10_000 { return String(format: "%.1f km", d / 1000) }
         return "\(Int((d / 1000).rounded())) km"
+    }
+}
+
+/// The arrow of the compass. It turns the short way: from 350° to 10° it moves 20°, not 340° backwards.
+struct CompassArrow: View {
+    let angle: Double
+    let color: Color
+    @State private var shown: Double?
+
+    var body: some View {
+        Image(systemName: "location.north.fill")
+            .font(.system(size: 96, weight: .bold))
+            .foregroundStyle(color)
+            .rotationEffect(.degrees(shown ?? angle))
+            .onAppear { shown = angle }
+            .onChange(of: angle) { new in
+                let from = shown ?? new
+                var delta = (new - from).truncatingRemainder(dividingBy: 360)
+                if delta > 180 { delta -= 360 } else if delta < -180 { delta += 360 }
+                withAnimation(Theme.lowPower ? nil : .spring(response: 0.4, dampingFraction: 0.8)) { shown = from + delta }
+            }
+            .accessibilityHidden(true)
     }
 }

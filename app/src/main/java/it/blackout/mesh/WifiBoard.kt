@@ -9,6 +9,7 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.ByteArrayOutputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -24,8 +25,9 @@ import kotlin.concurrent.thread
 
 /**
  * Wi-Fi board for people without the app: this phone opens its own Wi-Fi network (no internet needed) and serves a
- * web page where anyone who joins can read and post Public channel messages from a browser. Group messages are never
- * shown here. Posts enter the mesh like any other Public message.
+ * web page where anyone who joins can read and post Everyone messages from a browser, and download DarkProof for
+ * Android. Group messages are never shown here. Posts enter the mesh like any other Everyone message. Blocked people,
+ * reported messages and offensive words are hidden like in the app.
  */
 object WifiBoard {
     const val PORT = 8080
@@ -39,6 +41,7 @@ object WifiBoard {
     @Volatile private var wifi: String? = null  // the network to join, or why there is none
     @Volatile private var error: String? = null // why the board could not start
     @Volatile private var before = emptySet<String>() // addresses this phone had before the hotspot started
+    @Volatile private var app: Context? = null
     private val pool = Executors.newFixedThreadPool(8) // caps how many browsers are served at once
     private val lastPost = ConcurrentHashMap<String, Long>() // client address -> time of last post
     private val time = SimpleDateFormat("HH:mm", Locale.US)
@@ -54,7 +57,7 @@ object WifiBoard {
 
     fun start(ctx: Context, changed: () -> Unit) {
         if (on) return
-        on = true; wifi = null; error = null; before = addresses().keys
+        on = true; wifi = null; error = null; before = addresses().keys; app = ctx.applicationContext
         startServer(changed)
         val fallback = "People on the same Wi-Fi as this phone can still use the board."
         try {
@@ -68,10 +71,14 @@ object WifiBoard {
                     main.postDelayed(changed, 2_000); main.postDelayed(changed, 6_000) // the address can come a moment later
                 }
                 override fun onStopped() { reservation = null; wifi = "The Wi-Fi network stopped. $fallback"; changed() }
-                override fun onFailed(reason: Int) { wifi = "Could not open a Wi-Fi network (code $reason). $fallback"; changed() }
+                override fun onFailed(reason: Int) {
+                    wifi = (if (reason == WifiManager.LocalOnlyHotspotCallback.ERROR_TETHERING_DISALLOWED) "This phone doesn't allow its own Wi-Fi network."
+                            else "Couldn't open a Wi-Fi network. Turn off the phone's hotspot and try again.") + " $fallback"
+                    changed()
+                }
             }, main)
         } catch (e: Exception) { // e.g. missing permission, or Wi-Fi turned off
-            wifi = "Could not open a Wi-Fi network: ${e.message}. $fallback"
+            wifi = "Couldn't open a Wi-Fi network: turn Wi-Fi and Location on and try again. $fallback"
             changed()
         }
     }
@@ -110,7 +117,7 @@ object WifiBoard {
     private fun startServer(changed: () -> Unit) {
         thread(isDaemon = true, name = "wifi-board") {
             val ss = try { ServerSocket(PORT) } catch (e: Exception) {
-                error = "Could not start the board: ${e.message}"; main.post { stop(); changed() }; return@thread
+                error = "Couldn't start the board. Restart DarkProof and try again."; main.post { stop(); changed() }; return@thread
             }
             server = ss
             try { while (true) { val s = ss.accept(); pool.execute { handle(s) } } }
@@ -130,7 +137,8 @@ object WifiBoard {
                 ?.substringAfter(':')?.trim()?.toIntOrNull()?.coerceIn(0, 4096) ?: 0
             val body = ByteArray(length).also { var n = 0; while (n < length) { val r = inp.read(it, n, length - n); if (r < 0) break; n += r } }
             when {
-                method == "GET" && path == "/" -> respond(s, 200, "text/html; charset=utf-8", PAGE)
+                method == "GET" && path == "/" -> respond(s, 200, "text/html; charset=utf-8", page())
+                method == "GET" && path == "/DarkProof.apk" && apk() != null -> sendFile(s, apk()!!)
                 method == "GET" && path.startsWith("/messages") -> respond(s, 200, "application/json", messages())
                 method == "POST" && path == "/send" -> respond(s, 200, "application/json", post(s, String(body, Charsets.UTF_8)))
                 else -> respond(s, 404, "text/plain", "Not found")
@@ -157,11 +165,23 @@ object WifiBoard {
         s.getOutputStream().apply { write(head.toByteArray(Charsets.US_ASCII)); write(body); flush() }
     }
 
+    /** Everyone messages as the app shows them: without blocked people and reported messages, words filtered (WordFilter). */
     private fun messages(): String = JSONArray().apply {
-        MeshEngine.snapshot().filter { it.public }.takeLast(100).forEach {
-            put(JSONObject().put("t", time.format(Date(it.ts))).put("n", it.name).put("x", it.text))
+        val c = app
+        MeshEngine.snapshot().filter { it.public && (c == null || Moderation.visible(c, it)) }.takeLast(100).forEach {
+            put(JSONObject().put("t", time.format(Date(it.ts))).put("n", WordFilter.clean(it.name)).put("x", WordFilter.clean(it.text)))
         }
     }.toString()
+
+    /** This app's APK, to download from the board; null if it was installed in parts (an app store bundle). */
+    private fun apk(): java.io.File? = app?.applicationInfo?.takeIf { it.splitSourceDirs.isNullOrEmpty() }?.sourceDir?.let(::File)?.takeIf { it.canRead() }
+
+    private fun sendFile(s: Socket, f: java.io.File) {
+        val head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.android.package-archive\r\nContent-Length: ${f.length()}\r\n" +
+            "Content-Disposition: attachment; filename=\"DarkProof.apk\"\r\nConnection: close\r\n\r\n"
+        s.soTimeout = 60_000
+        s.getOutputStream().apply { write(head.toByteArray(Charsets.US_ASCII)); f.inputStream().use { it.copyTo(this, 64 * 1024) }; flush() }
+    }
 
     private fun post(s: Socket, form: String): String {
         val f = form.split("&").associate { kv ->
@@ -177,28 +197,35 @@ object WifiBoard {
         return """{"ok":true}"""
     }
 
+    private fun page() = PAGE.replace("<!--APK-->", if (apk() != null)
+        """<a class="get" href="/DarkProof.apk" download>Get DarkProof for Android</a><p class="n">Then open the file and allow installing apps from your browser. The app works without internet.</p>""" else "")
+
+    // The app's look: white on black, charcoal cards, white capsule buttons (Ui.kt Theme).
     private val PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DarkProof board</title><style>
-body{background:#000;color:#f2f2f2;font:16px -apple-system,system-ui,sans-serif;margin:0 auto;padding:20px 16px;max-width:640px}
-.k,h1,button{font-family:ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
-h1{font-size:22px;font-weight:800;margin:0 0 6px}h1 b{color:#ffa61a}.n{color:#8f8f8f;font-size:13px}
-.k{font-size:11px;font-weight:700;color:#3fbff9;border:1px solid #3fbff980;border-radius:99px;padding:2px 7px;margin-right:6px}
-.m{margin:14px 0}.b{background:#1f1f1f;border-radius:18px;padding:10px 14px;margin-top:4px;display:inline-block;max-width:85%;white-space:pre-wrap}
-input,textarea,button{width:100%;box-sizing:border-box;font:inherit;margin:6px 0;padding:13px;border-radius:12px;border:1px solid #333;background:#1f1f1f;color:#f2f2f2}
-button{background:#ffa61a;color:#000;font-weight:800;border:0;font-family:ui-monospace,Menlo,monospace}</style></head><body>
-<h1>DarkProof<b>_</b></h1><p class="n">Public board. No internet needed. Everything here is public: anyone on the DarkProof network can read it.</p>
+body{background:#000;color:#fff;font:17px/1.4 -apple-system,system-ui,Roboto,sans-serif;margin:0 auto;padding:24px 16px 40px;max-width:640px}
+h1{font-size:30px;font-weight:900;margin:0 0 6px;letter-spacing:-.01em}.n{color:#949494;font-size:15px;margin:4px 0}
+.get{display:block;text-align:center;background:#212121;color:#fff;text-decoration:none;font-weight:600;border-radius:99px;padding:15px;margin:18px 0 4px}
+.m{background:#131313;border-radius:22px;padding:12px 16px;margin:10px 0}.w{color:#949494;font-size:14px;font-weight:600;margin-bottom:2px}
+.x{white-space:pre-wrap;word-wrap:break-word}.f{background:#131313;border-radius:24px;padding:16px;margin-top:20px}
+input,textarea{width:100%;box-sizing:border-box;font:inherit;margin:6px 0;padding:14px 16px;border-radius:16px;border:0;background:#212121;color:#fff}
+button{width:100%;font:inherit;font-weight:600;margin:8px 0 0;padding:15px;border-radius:99px;border:0;background:#fff;color:#000}</style></head><body>
+<h1>DarkProof</h1><p class="n">Board for Everyone. No internet needed. Anyone with DarkProof nearby or online can read what you post here.</p>
+<!--APK-->
 <div id="list"></div>
-<input id="name" placeholder="Your name" maxlength="30"><textarea id="text" placeholder="Message" maxlength="500" rows="3"></textarea>
-<button id="send">Send</button><p id="info" class="n"></p>
+<div class="f"><input id="name" placeholder="Your name" maxlength="30"><textarea id="text" placeholder="Message to everyone" maxlength="500" rows="3"></textarea>
+<button id="send">Send</button><p id="info" class="n"></p></div>
 <script>
 const $=id=>document.getElementById(id);try{$('name').value=localStorage.getItem('n')||''}catch(e){}
-async function load(){try{const a=await (await fetch('/messages')).json();$('list').textContent='';for(const m of a){
-const d=document.createElement('div');d.className='m';const h=document.createElement('div');h.className='n';
-const k=document.createElement('span');k.className='k';k.textContent='Public';h.append(k,m.n+'  '+m.t);
-const t=document.createElement('div');t.className='b';t.textContent=m.x;d.append(h,t);$('list').append(d)}}catch(e){}}
-$('send').onclick=async()=>{const n=$('name').value.trim(),x=$('text').value.trim();if(!n||!x)return;try{localStorage.setItem('n',n)}catch(e){}
-const j=await (await fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-body:'name='+encodeURIComponent(n)+'&text='+encodeURIComponent(x)})).json();$('info').textContent=j.ok?'Sent.':j.error;if(j.ok){$('text').value='';load()}};
+async function load(){try{const a=await (await fetch('/messages')).json();$('list').textContent='';
+if(!a.length){const p=document.createElement('p');p.className='n';p.textContent='No messages yet.';$('list').append(p)}
+for(const m of a){const d=document.createElement('div');d.className='m';const h=document.createElement('div');h.className='w';
+h.textContent=m.n+' · '+m.t;const t=document.createElement('div');t.className='x';t.textContent=m.x;d.append(h,t);$('list').append(d)}}catch(e){}}
+$('send').onclick=async()=>{const n=$('name').value.trim(),x=$('text').value.trim();if(!n||!x){$('info').textContent='Write your name and a message.';return}
+try{localStorage.setItem('n',n)}catch(e){}
+try{const j=await (await fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:'name='+encodeURIComponent(n)+'&text='+encodeURIComponent(x)})).json();$('info').textContent=j.ok?'Sent.':j.error;if(j.ok){$('text').value='';load()}}
+catch(e){$('info').textContent='Not sent. Are you still on the Wi-Fi network?'}};
 load();setInterval(load,4000);
 </script></body></html>"""
 }

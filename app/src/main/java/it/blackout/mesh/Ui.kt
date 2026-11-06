@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -32,6 +33,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,7 +54,7 @@ object Theme {
     val line = Color(0xFF2B2B2B)
     val text = Color.White
     val dim = Color(0xFF949494)
-    val faint = Color(0xFF616161)
+    val faint = Color(0xFF888888) // at least 4.5:1 on black, cards and tiles: it still carries information
     val safe = Color(0xFF33D64A)
     val help = Color(0xFFFF453B)
 }
@@ -122,15 +125,22 @@ fun vaultShape(cut: Dp = 42.dp, radius: Dp = 46.dp, small: Dp = 8.dp): Shape = o
 @Composable private fun Pressable(enabled: Boolean, onClick: () -> Unit, content: @Composable (Modifier) -> Unit) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    // One layer whose values are read when it draws: a button that turns on while it is under the keyboard is still
+    // drawn once the keyboard goes away (separate scale and alpha layers were sometimes left blank).
+    val look by rememberUpdatedState(if (!enabled) 0.35f else if (pressed) 0.8f else 1f)
+    val size by rememberUpdatedState(if (pressed) 0.97f else 1f)
     content(Modifier
-        .scale(if (pressed) 0.97f else 1f)
-        .alpha(if (!enabled) 0.35f else if (pressed) 0.8f else 1f)
+        .graphicsLayer { scaleX = size; scaleY = size; alpha = look }
         .clickable(source, null, enabled, role = Role.Button, onClick = onClick))
 }
 
 /** The one main action on a screen: full-width white capsule, black text. */
 @Composable fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, @DrawableRes icon: Int? = null, onClick: () -> Unit) =
     CapsuleButton(text, modifier, enabled, icon, Color.White, Color.Black, onClick)
+
+/** An urgent main action ("Send “I need help”"): full-width red capsule, white text. */
+@Composable fun DangerButton(text: String, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, onClick: () -> Unit) =
+    CapsuleButton(text, modifier, true, icon, Theme.help, Color.White, onClick)
 
 /** A second full-width action: dark capsule, white text. */
 @Composable fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, @DrawableRes icon: Int? = null, onClick: () -> Unit) =
@@ -155,7 +165,8 @@ fun vaultShape(cut: Dp = 42.dp, radius: Dp = 46.dp, small: Dp = 8.dp): Shape = o
 /** Round icon button, e.g. settings in a header. */
 @Composable fun RoundIcon(@DrawableRes id: Int, size: Dp = 42.dp, tint: Color = Theme.text, bg: Color = Theme.tile, desc: String, onClick: () -> Unit) =
     Pressable(true, onClick) { m ->
-        Box(Modifier.size(size).clip(CircleShape).background(bg).then(m), contentAlignment = Alignment.Center) { Ic(id, tint, size * 0.45f) }
+        Box(Modifier.size(size).clip(CircleShape).background(bg).then(m).semantics { contentDescription = desc }, // TalkBack reads it
+            contentAlignment = Alignment.Center) { Ic(id, tint, size * 0.45f) }
     }
 
 /** Two-way switch in a capsule, e.g. List | Map. */
@@ -234,6 +245,12 @@ fun vaultShape(cut: Dp = 42.dp, radius: Dp = 46.dp, small: Dp = 8.dp): Shape = o
         title = { Txt(title, 20, FontWeight.Bold) }, text = { Txt(text, 15, color = Theme.dim) },
         confirmButton = { TextButton(onYes) { Txt(yes, 16, FontWeight.Bold, if (danger) Theme.help else Theme.text) } },
         dismissButton = { TextButton(onNo) { Txt("Cancel", 16, FontWeight.SemiBold, Theme.dim) } })
+
+/** A message with one button, in the app's colors. */
+@Composable fun Info(title: String, text: String, ok: String = "OK", onOk: () -> Unit) =
+    AlertDialog(onOk, containerColor = Theme.card, titleContentColor = Theme.text, textContentColor = Theme.dim,
+        title = { Txt(title, 20, FontWeight.Bold) }, text = { Txt(text, 15, color = Theme.dim) },
+        confirmButton = { TextButton(onOk) { Txt(ok, 16, FontWeight.Bold) } })
 
 /** Battery level, red at 20% or less. */
 @Composable fun BatteryLabel(percent: Int) {

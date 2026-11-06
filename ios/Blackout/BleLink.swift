@@ -11,6 +11,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     static let prefix = "ble:"
     private static let maxLinks = 6
     private static let retryDelay: TimeInterval = 5
+    private static let sweepEvery: TimeInterval = 5
+    private static let stale: TimeInterval = 5 // at the link limit, a link with no HELLO this old makes room
 
     private final class Link {
         let id: String
@@ -24,8 +26,11 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
         var remote: String?
         var up = false                    // known to the router
         var busy = false                  // central role: a write is in flight
-        var out: [Data] = []
+        let createdAt = Date()
+        var openedAt: Date?               // when setup finished: the other side's HELLO must come within 10 s
+        var out = BleProtocol.Outbox()    // capped: oldest packet frames go first
         var reader = BleProtocol.Reader()
+        var gate = BleProtocol.HelloGate() // repeated HELLOs (spec "Restarts")
         init(id: String, isCentral: Bool, key: UUID) { self.id = id; self.isCentral = isCentral; self.key = key }
     }
 
@@ -66,7 +71,29 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
             self.pm = CBPeripheralManager(delegate: self, queue: self.q)
             #endif
             self.report()
+            self.sweep()
         }
+    }
+
+    /// Every 5 s: closes links whose other side sent no HELLO within 10 s of the link opening, and central links still
+    /// setting up after 30 s (spec "Limits"). A peripheral-role link is only forgotten: iOS can't disconnect a central,
+    /// but this phone stops serving it and it no longer counts toward the link limit.
+    private func sweep() {
+        let now = Date()
+        for l in links.values where l.remote == nil {
+            if let o = l.openedAt { if now.timeIntervalSince(o) >= BleProtocol.helloWait { drop(l) } }
+            else if now.timeIntervalSince(l.createdAt) >= BleProtocol.setupWait { drop(l) }
+        }
+        q.asyncAfter(deadline: .now() + Self.sweepEvery) { [weak self] in self?.sweep() }
+    }
+
+    /// At the link limit: forgets the oldest link whose other side hasn't sent HELLO after 5 s, if any.
+    private func makeRoom() -> Bool {
+        let now = Date()
+        guard let stale = links.values.filter({ $0.remote == nil && now.timeIntervalSince($0.createdAt) >= Self.stale })
+            .min(by: { $0.createdAt < $1.createdAt }) else { return false }
+        drop(stale)
+        return true
     }
 
     #if os(iOS)
@@ -103,6 +130,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     // MARK: - Central role: scan and connect
 
     func centralManagerDidUpdateState(_ c: CBCentralManager) {
+        nodeLock.lock(); _state = c.state; nodeLock.unlock()
         switch c.state {
         case .poweredOn:
             c.scanForPeripherals(withServices: [service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
@@ -119,9 +147,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
 
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
         let k = p.identifier
-        guard links.count < Self.maxLinks, !links.values.contains(where: { $0.isCentral && $0.key == k }),
-              Date() >= retryAt[k] ?? .distantPast else { return }
+        guard !links.values.contains(where: { $0.isCentral && $0.key == k }), Date() >= retryAt[k] ?? .distantPast else { return }
         if let n = nodeOf[k], links.values.contains(where: { $0.up && $0.remote == n }) { return } // already linked the other way
+        guard links.count < Self.maxLinks || makeRoom() else { return }
         let l = Link(id: newLinkId(), isCentral: true, key: k)
         l.peripheral = p
         links[l.id] = l
@@ -153,8 +181,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
         guard let l = link(p) else { return }
         guard error == nil, c.isNotifying else { drop(l); return }
         l.chunk = BleProtocol.chunkSize(maxLength: p.maximumWriteValueLength(for: .withResponse))
-        l.open = true
-        enqueue(l, BleProtocol.hello(nodeId: nodeId))
+        l.open = true; l.openedAt = Date()
+        enqueue(l, BleProtocol.hello(nodeId: nodeId), hello: true)
     }
 
     func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) {
@@ -201,13 +229,13 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     }
 
     func peripheralManager(_ m: CBPeripheralManager, central: CBCentral, didSubscribeTo c: CBCharacteristic) {
-        guard c.uuid == txUUID, link(central) == nil, links.count < Self.maxLinks else { return }
+        guard c.uuid == txUUID, link(central) == nil, links.count < Self.maxLinks || makeRoom() else { return }
         let l = Link(id: newLinkId(), isCentral: false, key: central.identifier)
         l.central = central
         l.chunk = BleProtocol.chunkSize(maxLength: central.maximumUpdateValueLength)
-        l.open = true
+        l.open = true; l.openedAt = l.createdAt
         links[l.id] = l
-        enqueue(l, BleProtocol.hello(nodeId: nodeId))
+        enqueue(l, BleProtocol.hello(nodeId: nodeId), hello: true)
     }
 
     func peripheralManager(_ m: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom c: CBCharacteristic) {
@@ -232,8 +260,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     private func link(_ c: CBCentral) -> Link? { links.values.first { !$0.isCentral && $0.key == c.identifier } }
     private func newLinkId() -> String { nextId += 1; return Self.prefix + String(nextId) }
 
-    private func enqueue(_ l: Link, _ frame: Data) {
-        l.out += BleProtocol.chunks(frame, size: l.chunk)
+    /// Queues a frame; the queue is capped (BleProtocol.Outbox): the oldest packet frames go first, HELLO never.
+    private func enqueue(_ l: Link, _ frame: Data, hello: Bool = false) {
+        l.out.add(frame, hello: hello)
         pump(l)
     }
 
@@ -242,13 +271,13 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     private func pump(_ l: Link) {
         guard links[l.id] === l, l.open else { return }
         if l.isCentral {
-            guard !l.busy, let c = l.out.first, let p = l.peripheral, let rx = l.rx else { return }
-            l.out.removeFirst()
+            guard !l.busy, let p = l.peripheral, let rx = l.rx, let c = l.out.peek(l.chunk) else { return }
+            l.out.commit()
             l.busy = true
             p.writeValue(c, for: rx, type: .withResponse)
         } else {
             guard let m = pm, let central = l.central, let txc = tx else { return }
-            while let c = l.out.first, m.updateValue(c, for: txc, onSubscribedCentrals: [central]) { l.out.removeFirst() }
+            while let c = l.out.peek(l.chunk), m.updateValue(c, for: txc, onSubscribedCentrals: [central]) { l.out.commit() }
         }
     }
 
@@ -261,9 +290,12 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
             case BleProtocol.helloType:
                 guard let r = BleProtocol.parseHello(f.payload), r != nodeId else { drop(l); return }
                 if l.remote == nil { hello(l, r) }
-                else if r == l.remote { // spec: "Restarts". The other app restarted on a connection that stayed up
-                    enqueue(l, BleProtocol.hello(nodeId: nodeId))
-                    if l.up { router.peerUp(l.id) } // everything stored, again: the receiver ignores what it has
+                else if r == l.remote { // spec: "Restarts". The other app restarted on a connection that stayed up.
+                    // Answer and send everything stored again, each at most once a minute (no HELLO ping-pong, no
+                    // endless re-sync); the receiver ignores what it has.
+                    let g = l.gate.repeated(nowMs: Int64(Date().timeIntervalSince1970 * 1000), queueEmpty: l.out.isEmpty)
+                    if g.answer { enqueue(l, BleProtocol.hello(nodeId: nodeId), hello: true) }
+                    if g.resync && l.up { router.peerUp(l.id) }
                 } else { drop(l); return }
             case BleProtocol.packetType where l.up:
                 if let p = Packet.decode(f.payload) { router.receive(from: l.id, p) }
@@ -292,7 +324,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
     private func drop(_ l: Link) {
         guard links.removeValue(forKey: l.id) != nil else { return }
         l.open = false
-        l.out = []
+        l.out.clear()
         if l.isCentral {
             retryAt[l.key] = Date().addingTimeInterval(Self.retryDelay)
             if let p = l.peripheral { cm?.cancelPeripheralConnection(p) }
@@ -311,6 +343,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
 
     /// Node ids of the devices linked right now. Safe from any thread.
     var nodes: [String] { nodeLock.lock(); defer { nodeLock.unlock() }; return _nodes }
+    /// Bluetooth on this phone: on, off, not allowed for DarkProof, missing (Simulator). Safe from any thread.
+    var state: CBManagerState { nodeLock.lock(); defer { nodeLock.unlock() }; return _state }
     private let nodeLock = NSLock()
     private var _nodes: [String] = []
+    private var _state = CBManagerState.unknown
 }

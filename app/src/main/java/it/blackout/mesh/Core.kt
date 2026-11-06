@@ -44,9 +44,12 @@ class Packet(val id: String, val ts: Long, val ttl: Int, val cipher: ByteArray) 
     }
 }
 
-/** [public]: sent on the Public channel (spec/FORMAT.md), readable by everyone. [photo]: a small JPEG, or null. */
+/**
+ * [public]: sent on the Public channel (spec/FORMAT.md), readable by everyone. [photo]: a small JPEG, or null.
+ * [group]: the code of the saved group whose key opened it (null for Public messages). Not sent on the wire.
+ */
 data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String,
-                   val public: Boolean = false, val photo: ByteArray? = null)
+                   val public: Boolean = false, val photo: ByteArray? = null, val group: String? = null)
 
 class GroupCrypto private constructor(private val keyBytes: ByteArray, mailbox: Int?) {
     constructor(code: String) : this(deriveKey(code), null)
@@ -123,19 +126,37 @@ class MeshRouter(
     private val retentionMs: Long = 7 * 24 * 3600_000L,
     private val maxStored: Int = 500,
 ) {
+    companion object {
+        /** Hops a new packet gets. A received packet with more (v0.4 decoding allows up to 64) is lowered to this. */
+        const val MAX_TTL = 16
+        /** Packets dated more than this ahead of this phone's clock are dropped (spec/FORMAT.md, "Forwarding rules"). */
+        const val MAX_FUTURE_MS = 10 * 60_000L
+        fun inFuture(ts: Long, now: Long) = ts > now + MAX_FUTURE_MS
+        fun clamp(p: Packet) = if (p.ttl > MAX_TTL) p.withTtl(MAX_TTL) else p
+    }
     private val peers = LinkedHashSet<String>()
     private val seen = HashSet<String>()
     private val stored = LinkedHashMap<String, Packet>()
     @Synchronized fun peerCount() = peers.size
-    /** After a restart: [all] is passed on again; [seenIds] are packets already handled, so they aren't shown twice. */
+    /**
+     * After a restart: [all] is passed on again; [seenIds] are packets already handled, so they aren't shown twice.
+     * Packets dated in the future are left out. Peers already linked get the packets that are new to the router.
+     */
     @Synchronized fun restore(all: List<Packet>, seenIds: Collection<String> = emptyList()) {
-        seen += seenIds; all.sortedBy { it.ts }.forEach { seen += it.id; keep(it) }
+        seen += seenIds
+        val t = now()
+        val fresh = all.filter { !inFuture(it.ts, t) && it.id !in stored }.sortedBy { it.ts }.map(::clamp)
+        fresh.forEach { seen += it.id; keep(it) }
+        for (p in fresh) if (stored.containsKey(p.id)) peers.forEach { forward(it, p) }
     }
     @Synchronized fun publish(p: Packet) { seen += p.id; keep(p); peers.forEach { forward(it, p) } }
     @Synchronized fun peerDown(peer: String) { peers -= peer }
     @Synchronized fun peerUp(peer: String) { peers += peer; prune(); stored.values.forEach { forward(peer, it) } }
-    @Synchronized fun receive(from: String, p: Packet) {
-        if (p.ts < now() - retentionMs || !seen.add(p.id)) return
+    /** Packets older than 7 days or more than 10 minutes in the future are dropped; ttl above 16 is lowered to 16. */
+    @Synchronized fun receive(from: String, packet: Packet) {
+        val t = now()
+        if (packet.ts < t - retentionMs || inFuture(packet.ts, t) || !seen.add(packet.id)) return
+        val p = clamp(packet)
         keep(p); deliver(p)
         peers.filter { it != from }.forEach { forward(it, p) }
     }
@@ -146,4 +167,70 @@ class MeshRouter(
         stored.values.removeAll { it.ts < cut }
         while (stored.size > maxStored) stored.remove(stored.keys.first())
     }
+}
+
+/**
+ * Which stored packets to remove when the store is over its cap (spec/FORMAT.md, "Storage"): first packets no saved
+ * group can read, oldest first, then the oldest Public messages, and only then the oldest messages and receipts of
+ * the saved groups. Same rules as the iPhone's StoreCap.
+ */
+object StoreCap {
+    const val MAX_BYTES = 40L * 1024 * 1024
+    const val MAX_COUNT = 20_000
+    /** In the order they go: [UNREADABLE] first, [GROUP] last. */
+    enum class Kind { UNREADABLE, PUBLIC, GROUP }
+    /** [size]: the encoded packet's length. */
+    class Entry(val id: String, val ts: Long, val size: Int, val kind: Kind)
+
+    /** Ids to remove so that at most [maxBytes] and [maxCount] remain; empty if the store fits. */
+    fun overflow(entries: Collection<Entry>, maxBytes: Long = MAX_BYTES, maxCount: Int = MAX_COUNT): List<String> {
+        var bytes = entries.sumOf { it.size.toLong() }; var count = entries.size
+        if (bytes <= maxBytes && count <= maxCount) return emptyList()
+        val out = ArrayList<String>()
+        for (e in entries.sortedWith(compareBy<Entry>({ it.kind.ordinal }, { it.ts }, { it.id }))) {
+            if (bytes <= maxBytes && count <= maxCount) break
+            out += e.id; bytes -= e.size; count--
+        }
+        return out
+    }
+}
+
+/**
+ * Two links between the same two phones (spec/FORMAT.md, "Wi-Fi networks"): which one stays. When both phones dialed
+ * each other at about the same time (the older link is less than 10 s old), the link dialed by the smaller node id
+ * stays, so both phones keep the same one. Otherwise, or when the same phone dialed both, the new link replaces the
+ * old one: after a restart the old one may be dead without either side knowing.
+ */
+object DuplicateLinks {
+    const val SAME_TIME_MS = 10_000L
+    fun keepNew(myId: String, remoteId: String, newDialedByMe: Boolean, oldDialedByMe: Boolean, oldAgeMs: Long): Boolean {
+        if (newDialedByMe == oldDialedByMe || oldAgeMs >= SAME_TIME_MS) return true
+        val meSmaller = BleProtocol.keepMyCentralLink(myId, remoteId) // byte comparison of the node ids
+        return if (newDialedByMe) meSmaller else !meSmaller
+    }
+}
+
+/** An ordered set of ids that forgets the oldest beyond [max], for lists saved on the phone. Not thread-safe. */
+class RecentIds(private val max: Int, initial: Collection<String> = emptyList()) {
+    private val set = LinkedHashSet<String>()
+    init { initial.forEach(::add) }
+    /** True if [id] is new. */
+    fun add(id: String): Boolean {
+        if (!set.add(id)) return false
+        while (set.size > max) set.remove(set.first())
+        return true
+    }
+    operator fun contains(id: String) = id in set
+    val size get() = set.size
+    fun toList(): List<String> = set.toList()
+}
+
+/**
+ * When the next delivery receipt goes out (spec/FORMAT.md, "Delivery receipts"): 2 s after the last message to
+ * confirm arrived, or 10 s after the first one, so a burst of arriving messages shares one receipt.
+ */
+object ReceiptBatch {
+    const val QUIET_MS = 2_000L
+    const val MAX_WAIT_MS = 10_000L
+    fun due(firstMs: Long, lastMs: Long, nowMs: Long) = nowMs - lastMs >= QUIET_MS || nowMs - firstMs >= MAX_WAIT_MS
 }

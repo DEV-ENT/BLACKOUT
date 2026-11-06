@@ -52,4 +52,27 @@ class BleProtocolTest {
         assertFalse(BleProtocol.keepMyCentralLink("7c0d995b-2c4", "259b6c4d-e98"))
         assertTrue(BleProtocol.keepMyCentralLink("abc", "abcd"))
     }
+    /** Same checks as the iPhone's BleProtocolTests.testRepeatedHelloIsAnsweredAtMostOncePerMinute. */
+    @Test fun repeatedHelloIsAnsweredAtMostOncePerMinute() {
+        val g = BleProtocol.HelloGate()
+        assertEquals(true to true, g.repeated(1_000, queueEmpty = true))     // a restart: answer and send everything again
+        assertEquals(false to false, g.repeated(30_000, queueEmpty = true))  // within a minute: neither (no ping-pong)
+        assertEquals(true to false, g.repeated(61_000, queueEmpty = false))  // queue still busy: answer only
+        assertEquals(false to true, g.repeated(62_000, queueEmpty = true))
+    }
+
+    /** Same checks as the iPhone's BleProtocolTests.testOutboxIsCappedAndKeepsHello. */
+    @Test fun outboxIsCappedAndKeepsHello() {
+        val o = BleProtocol.Outbox(maxBytes = 100, maxFrames = 3)
+        val hello = BleProtocol.hello("node-a")
+        o.add(hello, hello = true)
+        o.add(ByteArray(40) { 1 }); o.add(ByteArray(40) { 2 }); o.add(ByteArray(40) { 3 }) // over: the oldest packet goes
+        assertEquals(3, o.count); assertEquals(hello.size + 80, o.bytes)
+        assertArrayEquals(hello.copyOf(5), o.peek(5)); o.commit()          // half of the HELLO went out...
+        o.add(ByteArray(40) { 4 })                                          // ...so it stays; frame 2 goes
+        val rest = ArrayList<Byte>()
+        while (true) { val c = o.peek(7) ?: break; rest += c.toList(); o.commit() }
+        assertArrayEquals(hello.copyOfRange(5, hello.size) + ByteArray(40) { 3 } + ByteArray(40) { 4 }, rest.toByteArray())
+        assertTrue(o.isEmpty); assertEquals(0, o.bytes)
+    }
 }

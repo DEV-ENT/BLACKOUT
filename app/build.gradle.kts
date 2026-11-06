@@ -21,6 +21,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("com.google.zxing:core:3.5.3") // invite QR codes, offline
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0") // scan invite QR codes; Google's scanner UI, no camera permission
     implementation("org.maplibre.gl:android-sdk:12.3.1") // offline street maps (OpenFreeMap)
     implementation("com.squareup.okhttp3:okhttp:4.12.0") // MapLibre's HTTP client: User-Agent and 4-connection limit
     implementation("info.guardianproject:tor-android:0.4.9.14") // Tor inside the app, for "Connect through Tor" (BSD)

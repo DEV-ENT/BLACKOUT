@@ -9,13 +9,64 @@ enum Theme {
     static let tile = Color(white: 0.13)    // inputs, other people's bubbles, secondary buttons
     static let line = Color(white: 0.17)    // dividers
     static let text = Color.white
-    static let dim = Color(white: 0.58)
-    static let faint = Color(white: 0.38)
+    static let dim = Color(white: 0.64)     // secondary text: 7:1 on black, 5.8:1 on tiles
+    static let faint = Color(white: 0.54)   // hints and placeholders: still at least 4.5:1 on black, cards and tiles
+    static let decor = Color(white: 0.38)   // only for shapes that carry no information (chevrons, empty states)
     static let safe = Color(red: 0.2, green: 0.84, blue: 0.29)
     static let help = Color(red: 1.0, green: 0.27, blue: 0.23)
 
     /// Animations stay off with Reduce Motion or Low Power Mode: in a blackout the battery matters more.
     static var lowPower: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
+
+    /// A font size that follows the user's text size (Settings > Display > Text Size), like the system text styles,
+    /// with a ceiling so screens keep their layout: body text grows up to about 1.7×, titles less.
+    static func scaled(_ size: CGFloat, _ dts: DynamicTypeSize) -> CGFloat {
+        let s = UIFontMetrics(forTextStyle: .body).scaledValue(for: size, compatibleWith: UITraitCollection(preferredContentSizeCategory: category(dts)))
+        let cap: CGFloat = size >= 40 ? 1.15 : size >= 24 ? 1.35 : 1.7
+        return max(size * 0.8, min(s, size * cap)).rounded()
+    }
+
+    private static func category(_ d: DynamicTypeSize) -> UIContentSizeCategory {
+        switch d {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
+    }
+}
+
+/// `.scaledFont(17, .semibold)`: the system font at a size that follows Dynamic Type (Theme.scaled).
+struct ScaledFont: ViewModifier {
+    let size: CGFloat
+    var weight: Font.Weight = .regular
+    var design: Font.Design = .default
+    @Environment(\.dynamicTypeSize) private var dts
+    func body(content: Content) -> some View { content.font(.system(size: Theme.scaled(size, dts), weight: weight, design: design)) }
+}
+
+extension View {
+    func scaledFont(_ size: CGFloat, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design))
+    }
+}
+
+/// Opens DarkProof's page in the iPhone Settings app (permissions, notifications).
+struct OpenSettingsButton: View {
+    var title = "Open Settings"
+    var body: some View {
+        Button(title) { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+            .buttonStyle(GhostButton())
+    }
 }
 
 /// The logo's silhouette: cut top-left corner, round right side, near-square bottom-left.
@@ -47,7 +98,7 @@ struct Kicker: View {
     let text: String
     var color = Theme.dim
     init(_ text: String, color: Color = Theme.dim) { self.text = text; self.color = color }
-    var body: some View { Text(text).font(.system(size: 14, weight: .semibold)).foregroundStyle(color) }
+    var body: some View { Text(text).scaledFont(14, .semibold).foregroundStyle(color) }
 }
 
 /// Section title with an optional action on the right, e.g. "Your people · See all".
@@ -57,10 +108,10 @@ struct SectionTitle: View {
     var tap: () -> Void = {}
     var body: some View {
         HStack {
-            Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+            Text(title).scaledFont(20, .bold).foregroundStyle(Theme.text)
             Spacer()
             if let action {
-                Button(action, action: tap).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.dim)
+                Button(action, action: tap).scaledFont(15, .semibold).foregroundStyle(Theme.dim)
             }
         }
     }
@@ -72,7 +123,7 @@ struct Chip: View {
     var color = Theme.dim
     init(_ text: String, _ color: Color = Theme.dim) { self.text = text; self.color = color }
     var body: some View {
-        Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(color)
+        Text(text).scaledFont(13, .semibold).foregroundStyle(color)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(color == Theme.dim ? Theme.tile : color.opacity(0.14), in: Capsule())
     }
@@ -99,7 +150,7 @@ struct PrimaryButton: ButtonStyle {
         @Environment(\.isEnabled) private var enabled
         var body: some View {
             configuration.label
-                .font(.system(size: 17, weight: .semibold))
+                .scaledFont(17, .semibold)
                 .foregroundStyle(primary ? Color.black : Theme.text)
                 .frame(maxWidth: .infinity, minHeight: 56)
                 .background(primary ? Color.white : Theme.tile, in: Capsule())
@@ -123,7 +174,7 @@ struct GhostButton: ButtonStyle {
         @Environment(\.isEnabled) private var enabled
         var body: some View {
             configuration.label
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                .scaledFont(15, .semibold).foregroundStyle(Theme.text)
                 .padding(.horizontal, 14).frame(minHeight: 36)
                 .background(Theme.tile, in: Capsule())
                 .opacity(enabled ? (configuration.isPressed ? 0.7 : 1) : 0.35)
@@ -135,7 +186,7 @@ struct GhostButton: ButtonStyle {
 struct RoundIcon: View {
     let symbol: String
     var body: some View {
-        Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
+        Image(systemName: symbol).scaledFont(17, .semibold).foregroundStyle(Theme.text)
             .frame(width: 42, height: 42).background(Circle().fill(Theme.tile))
     }
 }
@@ -146,9 +197,9 @@ struct ScreenTitle: View {
     let subtitle: String
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 32, weight: .heavy)).tracking(-0.5).foregroundStyle(Theme.text)
+            Text(title).scaledFont(32, .heavy).tracking(-0.5).foregroundStyle(Theme.text)
                 .lineLimit(1).minimumScaleFactor(0.6)
-            Text(subtitle).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.dim)
+            Text(subtitle).scaledFont(15, .medium).foregroundStyle(Theme.dim)
         }
     }
 }
@@ -185,7 +236,7 @@ struct PillSwitch: View {
 
     private func segment(_ title: String, on: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+            Text(title).scaledFont(15, .semibold).lineLimit(1)
                 .foregroundStyle(on ? Color.black : Theme.dim)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .background(Capsule().fill(on ? Color.white : .clear))
