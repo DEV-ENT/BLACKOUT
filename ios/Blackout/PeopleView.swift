@@ -9,10 +9,12 @@ extension CheckIn {
 }
 
 extension Engine {
-    /// Sends a check-in to the group with this phone's battery level, and a haptic.
+    /// Sends a check-in to the group with this phone's battery level and, if you share it, your position (a fresh
+    /// GPS fix can take a few seconds). The haptic comes right away.
     func checkIn(_ c: CheckIn) {
-        send(c.text(battery: Self.batteryPercent))
         UINotificationFeedbackGenerator().notificationOccurred(c == .safe ? .success : .warning)
+        let battery = Self.batteryPercent
+        LocationService.shared.forCheckIn { [weak self] spot in self?.send(c.text(battery: battery, spot: spot)) }
     }
 
     /// This phone's battery level, or nil when unknown (the Simulator has none).
@@ -180,15 +182,17 @@ struct PeopleList: View {
     let people: [Person]
     @ObservedObject var engine: Engine
     let now: Date
+    @State private var finding: Person?
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(people) { p in
-                PersonRow(person: p, inRange: engine.linkedNodes.contains(p.id), now: now)
+                PersonRow(person: p, inRange: engine.linkedNodes.contains(p.id), now: now) { finding = p }
                 if p.id != people.last?.id { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 76) }
             }
         }
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .sheet(item: $finding) { FindSheet(person: $0) }
     }
 }
 
@@ -196,6 +200,7 @@ struct PersonRow: View {
     let person: Person
     let inRange: Bool
     let now: Date
+    var find: () -> Void = {} // opens the compass, for people who shared their position
 
     var body: some View {
         let status: (String, Color) = person.checkIn.map { ("\($0.label) · \(ago(person.checkInTs, now))", $0.color) }
@@ -213,9 +218,16 @@ struct PersonRow: View {
                 if inRange { Chip("Nearby") }
                 if let b = person.battery { BatteryLabel(percent: b) }
             }
+            if person.spot != nil {
+                Button(action: find) { RoundIcon(symbol: "location.north.fill") }
+                    .accessibilityLabel("Find \(person.name)")
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture { if person.spot != nil { find() } }
         .accessibilityElement(children: .combine)
+        .accessibilityAction(named: "Find \(person.name)") { if person.spot != nil { find() } }
     }
 }
 
@@ -338,6 +350,8 @@ struct GroupSheet: View {
     @State private var groupDraft = ""
     @State private var joinCode = ""
     @State private var saved: [SavedGroups.Entry] = []
+    @AppStorage(LocationService.shareKey) private var shareLocation = false
+    @ObservedObject private var loc = LocationService.shared
 
     var body: some View {
         SheetPage(title: "Settings") {
@@ -352,6 +366,23 @@ struct GroupSheet: View {
                     .buttonStyle(PrimaryButton())
                     .disabled(clean(nameDraft, 20).isEmpty || clean(groupDraft, Invite.maxGroupName).isEmpty)
             }
+            Card {
+                Toggle(isOn: $shareLocation) {
+                    Text("Share my location in check-ins").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                }
+                .tint(Theme.safe)
+                Text("When you tap I'm safe or I need help, your group also sees where you are, and can find you with a compass. It works without internet. Only your group can read it.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                if shareLocation && loc.denied {
+                    Text("Location is off for DarkProof. Allow it in Settings, or your check-ins go out without it.")
+                        .font(.footnote).foregroundStyle(Theme.help)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    .buttonStyle(GhostButton())
+                }
+            }
+            .onChange(of: shareLocation) { on in if on { LocationService.shared.requestPermission() } }
             Card {
                 Text("Your other groups").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
                 let others = saved.filter { $0.code != code }

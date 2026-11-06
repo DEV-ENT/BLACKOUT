@@ -17,6 +17,9 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
   - **Group messages** are encrypted end to end with a key made from your group code. Phones that relay them cannot read them. Anyone who knows the group code can read them.
   - **Public channel messages** can be read by anyone who has DarkProof.
   - Each message carries the name you entered and a random ID for your phone.
+  - **Check-ins** ("I'm safe", "I need help") carry your battery level.
+  - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
+  - **Delivery receipts:** your phone tells your group which of their messages it received, so they can see "Delivered". Receipts are encrypted for your group too.
 - **Wi-Fi board (Android only).** When you turn it on, anyone who joins your phone's Wi-Fi network can read Public channel messages and post new ones from a browser. Group messages are never shown there.
 - **AI model downloads.** These are the only time DarkProof uses the internet, and only when you tap Download. Models come from Hugging Face (huggingface.co), which sees your IP address like any other website. Your questions to the AI never leave the phone.
 
@@ -24,11 +27,12 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
 
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
+- **Location (iPhone, optional)**: only while the app is open, to add your position to check-ins if you turned that on, and to point you toward a friend who shared theirs. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.
   - **Notifications**: to keep the mesh running in the background.
 
-DarkProof never reads your location.
+DarkProof never sends your location anywhere except to your group, and only if you turn that on. It never reads your location in the background.
 
 ## Deleting your data
 

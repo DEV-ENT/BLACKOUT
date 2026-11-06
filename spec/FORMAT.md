@@ -65,7 +65,14 @@ A check-in may end with ` · 🔋 NN%`: the sender's battery level (0 to 100) wh
 `✅ I'm safe · 🔋 23%`. Apps read the last `🔋 ` in a check-in, followed by 1 to 3 ASCII digits and `%`; anything
 else means no battery level. Apps that don't know it just show the text.
 
-A person's status is their most recent check-in, and so is their battery level.
+A check-in may also end with ` · 📍 LAT,LON` and optionally ` ±Nm`: where the sender was, in decimal degrees (WGS 84,
+5 decimals, `.` as the decimal point, `-` for south and west), and the radius in meters their phone was sure of, for
+example `✅ I'm safe · 🔋 23% · 📍 45.46420,9.19000 ±12m`. Apps read the last `📍 ` in a check-in; a latitude outside
+-90..90 or a longitude outside -180..180 means no position. A phone adds it only if its user turned on location
+sharing.
+
+A person's status is their most recent check-in, and so is their battery level. Their position is the one in their
+most recent check-in that carried a position.
 
 ## Delivery receipts
 

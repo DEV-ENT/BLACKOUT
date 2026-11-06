@@ -45,10 +45,31 @@ public enum CheckIn: String, Sendable {
 
     public static func of(_ text: String) -> CheckIn? { text.hasPrefix("✅") ? .safe : text.hasPrefix("🆘") ? .help : nil }
 
-    /// The message to send, with the phone's battery level when known: "✅ I'm safe · 🔋 23%".
-    public func text(battery: Int?) -> String {
-        guard let b = battery, (0...100).contains(b) else { return rawValue }
-        return "\(rawValue) · 🔋 \(b)%"
+    /// The message to send, with the phone's battery level and position when known:
+    /// "✅ I'm safe · 🔋 23% · 📍 45.46420,9.19000 ±12m".
+    public func text(battery: Int?, spot: Spot? = nil) -> String {
+        var t = rawValue
+        if let b = battery, (0...100).contains(b) { t += " · 🔋 \(b)%" }
+        if let spot, spot.isValid { t += " · 📍 " + spot.text }
+        return t
+    }
+
+    /// The position a check-in carries, if any.
+    public static func spot(in text: String) -> Spot? {
+        guard of(text) != nil, let r = text.range(of: "📍 ", options: .backwards) else { return nil }
+        let words = text[r.upperBound...].split(separator: " ", omittingEmptySubsequences: false)
+        let ll = words.first?.split(separator: ",", omittingEmptySubsequences: false) ?? []
+        let number: (Substring) -> Double? = { s in
+            s.count <= 12 && s.allSatisfy { $0.isASCII && ($0.isNumber || $0 == "." || $0 == "-") } ? Double(s) : nil
+        }
+        guard ll.count == 2, let lat = number(ll[0]), let lon = number(ll[1]) else { return nil }
+        var accuracy: Int?
+        if words.count > 1, words[1].hasPrefix("±"), words[1].hasSuffix("m") {
+            let digits = words[1].dropFirst().dropLast()
+            if digits.count <= 5, digits.allSatisfy({ $0.isASCII && $0.isNumber }) { accuracy = Int(digits) }
+        }
+        let s = Spot(lat: lat, lon: lon, accuracy: accuracy)
+        return s.isValid ? s : nil
     }
 
     /// The battery level (0–100) a check-in carries, if any.
@@ -71,6 +92,9 @@ public struct Person: Identifiable, Equatable, Sendable {
     public var checkInTs: Int64 = 0
     /// Battery level from their latest check-in, if it carried one.
     public var battery: Int? = nil
+    /// Where they were at their most recent check-in that carried a position, and when.
+    public var spot: Spot? = nil
+    public var spotTs: Int64 = 0
 
     /// Everyone who wrote in the group (not on the Public channel, not from a Wi-Fi board), people asking for help
     /// first, then the most recently heard.
@@ -80,6 +104,7 @@ public struct Person: Identifiable, Equatable, Sendable {
             var p = byId[m.sender] ?? Person(id: m.sender, name: m.name, lastTs: m.ts)
             if m.ts >= p.lastTs { p.lastTs = m.ts; p.name = m.name }
             if let c = CheckIn.of(m.text), m.ts >= p.checkInTs { p.checkIn = c; p.checkInTs = m.ts; p.battery = CheckIn.battery(in: m.text) }
+            if let s = CheckIn.spot(in: m.text), m.ts >= p.spotTs { p.spot = s; p.spotTs = m.ts }
             byId[m.sender] = p
         }
         return byId.values.sorted { ($0.checkIn == .help ? 1 : 0, $0.lastTs) > ($1.checkIn == .help ? 1 : 0, $1.lastTs) }
