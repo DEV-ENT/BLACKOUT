@@ -47,7 +47,10 @@ object MeshEngine {
     @Volatile var router: MeshRouter? = null; private set
     var sender: ((String, Packet) -> Unit)? = null
     var lora: LoraLink? = null
+    var meshcore: MeshCoreLink? = null
     var ble: BleLink? = null
+    /** Phones on the same Wi-Fi network; runs without the service, so it works even without Bluetooth permission. */
+    @Volatile var wifi: WifiLink? = null; private set
     var listener: (() -> Unit)? = null
     /** A new group message from someone else, on the main thread (for notifications). */
     var onIncoming: ((Message) -> Unit)? = null
@@ -68,7 +71,16 @@ object MeshEngine {
         db = Db(c.applicationContext).writableDatabase
         val (recent, seen) = synchronized(messages) { setKeys(code); load() }
         router = MeshRouter(send = ::route, deliver = ::onDeliver).also { it.restore(recent, seen) }
+        if (prefs.getBoolean("wifiNetwork", true)) setWifi(true)
         notifyUi()
+    }
+
+    /** Turns linking over Wi-Fi networks on or off (Connections screen), and remembers it. */
+    @Synchronized fun setWifi(on: Boolean) {
+        val c = app ?: return
+        c.getSharedPreferences("mesh", 0).edit().putBoolean("wifiNetwork", on).apply()
+        if (on && wifi == null) wifi = WifiLink(c, deviceId, { router }, ::notifyUi).also { w -> main.post { w.start(); notifyUi() } }
+        if (!on) { wifi?.let { w -> main.post { w.stop() } }; wifi = null; notifyUi() }
     }
 
     /** Joins another group: confirmations owed to the old one go out first, with its key. Main thread; the work runs in the background. */
@@ -123,7 +135,7 @@ object MeshEngine {
                 drop.chunked(500).forEach { c -> d.delete("p", "id IN (${c.joinToString(",") { "?" }})", c.toTypedArray()) }
                 d.setTransactionSuccessful()
             } finally { d.endTransaction() }
-            LanTest.log("store: removed ${drop.size} old packets")
+            DebugTools.log("store: removed ${drop.size} old packets")
         }
         synchronized(ids) { mine += own; receiptIds += rIds }
         messages.clear(); messages += msgs
@@ -140,11 +152,10 @@ object MeshEngine {
 
     /** Called by the router while it holds its lock: every transport only queues the packet. */
     private fun route(peer: String, p: Packet) {
-        val s = sender ?: return
-        val lora = peer == LoraLink.PEER
+        val lora = peer == LoraLink.PEER || peer == MeshCoreLink.PEER
         if (lora && synchronized(ids) { p.id in receiptIds }) return // receipts stay off LoRa, where airtime is scarce
-        s(peer, p)
-        if (lora && !Meshtastic.fits(p)) return // too long for the radio: not really sent
+        if (WifiLinks.owns(peer)) wifi?.links?.send(peer, p) else (sender ?: return)(peer, p)
+        if (lora && !(if (peer == LoraLink.PEER) Meshtastic.fits(p) else MeshCore.fits(p))) return // too long for the radio: not really sent
         if (synchronized(ids) { p.id in mine && handedOff.add(p.id) }) notifyUi()
     }
 
@@ -157,7 +168,7 @@ object MeshEngine {
             val m = read(p)
             if (m != null) {
                 if (messageIds.add(m.id)) { messages += m; messages.sortBy { it.ts } }
-                LanTest.log("received ${p.id} ${if (m.public) "public" else "group"} from ${m.name} photo=${m.photo?.size ?: 0}")
+                DebugTools.log("received ${p.id} ${if (m.public) "public" else "group"} from ${m.name} photo=${m.photo?.size ?: 0}")
                 if (!m.public && m.sender != deviceId) incoming = m
             } else {
                 val r = receiptKey?.open(p)
@@ -165,7 +176,7 @@ object MeshEngine {
                     synchronized(ids) { receiptIds += p.id }
                     deliveries.add(r)
                     val confirmed = Receipt.ids(r.text); val mineNow = synchronized(ids) { confirmed.count { it in mine } }
-                    LanTest.log("receipt ${p.id} from ${r.name} confirms ${confirmed.size} message(s), $mineNow of mine")
+                    DebugTools.log("receipt ${p.id} from ${r.name} confirms ${confirmed.size} message(s), $mineNow of mine")
                 }
             }
         }

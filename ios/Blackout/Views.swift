@@ -219,7 +219,7 @@ struct MainView: View {
                     sheet = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sheet = .invite }
                 }
-            case .radio: RadioView(engine: engine)
+            case .radio: ConnectionsView(engine: engine)
             }
         }
         .onAppear {
@@ -255,7 +255,7 @@ struct HomeView: View {
                             QuickAction(symbol: "checkmark.shield.fill", label: "I'm safe", tint: Theme.safe) { engine.checkIn(.safe) }
                             QuickAction(symbol: "sos", label: "Need help", tint: Theme.help) { confirmHelp = true }
                             QuickAction(symbol: "qrcode", label: "Invite", tint: Theme.text) { open(.invite) }
-                            QuickAction(symbol: "antenna.radiowaves.left.and.right", label: "Radio", tint: Theme.text) { open(.radio) }
+                            QuickAction(symbol: "antenna.radiowaves.left.and.right", label: "Connect", tint: Theme.text) { open(.radio) }
                         }
                         LastCheckIn(engine: engine, now: t.date).padding(.horizontal, 4)
                     }
@@ -905,105 +905,179 @@ struct ModelPicker: View {
     }
 }
 
-// MARK: - Radio
+// MARK: - Connections
 
-struct RadioView: View {
-    struct Radio: Identifiable { let id: UUID; let name: String }
+/// Every way messages travel, in one place: what is linked now, switches, pairing, and other apps.
+struct ConnectionsView: View {
     @ObservedObject var engine: Engine
+    @AppStorage("wifiNetwork") private var wifiOn = true
+    @AppStorage("name") private var myName = ""
+    @State private var address = ""
+    @State private var share: ShareText?
+
+    struct ShareText: Identifiable { let id = UUID(); let text: String }
+
+    var body: some View {
+        SheetPage(title: "Connections") {
+            Text("The ways your messages travel. None of them needs internet.")
+                .font(.system(size: 15)).foregroundStyle(Theme.dim)
+            Card {
+                HStack {
+                    Text("Nearby phones").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                    Spacer()
+                    Chip(engine.phones > 0 ? "\(engine.phones) linked" : "Searching", engine.phones > 0 ? Theme.safe : Theme.dim)
+                }
+                Text("iPhones and Android phones with DarkProof within about 10–50 m connect by themselves, over Bluetooth and Apple's peer-to-peer Wi-Fi.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                ForEach(["1-mc", "2-ble"], id: \.self) { k in
+                    if let line = engine.status[k] { Text(line).font(.system(size: 13)).foregroundStyle(Theme.faint) }
+                }
+            }
+            wifiCard
+            RadioCard(engine: engine, kind: .meshtastic)
+            RadioCard(engine: engine, kind: .meshcore)
+            Card {
+                Text("Send via another app").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                Text("For satellite messengers such as Garmin inReach or Zoleo, text messages once the network is back, or any app. It includes your battery and, if location is on, where you are. It leaves DarkProof: that app decides who can read it.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Share “I'm safe”") { shareStatus(.safe) }.buttonStyle(GhostButton())
+                    Button("Share “I need help”") { shareStatus(.help) }.buttonStyle(GhostButton())
+                }
+            }
+        }
+        .onChange(of: wifiOn) { on in engine.setWifi(on) }
+        .sheet(item: $share) { s in ActivityView(items: [s.text]).ignoresSafeArea() }
+    }
+
+    private var wifiCard: some View {
+        Card {
+            Toggle(isOn: $wifiOn) {
+                Text("Wi-Fi network").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+            }
+            .tint(Theme.safe)
+            Text("Phones on the same Wi-Fi find each other: a router with no internet, a phone hotspot, a neighbourhood network or a long-range rooftop link.")
+                .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            if wifiOn {
+                let n = engine.wifiNetworkLinks
+                Text(n > 0 ? "\(n) phone\(n == 1 ? "" : "s") linked over Wi-Fi" : "Looking on this network")
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(n > 0 ? Theme.safe : Theme.dim)
+                if let ip = Self.localAddress(), let port = engine.wifi.listeningPort {
+                    Text("This iPhone: \(ip):\(String(port))").font(.system(size: 14)).foregroundStyle(Theme.dim)
+                }
+                InputField(label: "Connect to an address") {
+                    TextField("", text: $address, prompt: Text("192.168.1.20:7777").foregroundColor(Theme.faint))
+                        .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                HStack(spacing: 10) {
+                    Button("Connect") {
+                        let a = address.trimmingCharacters(in: .whitespaces)
+                        if let i = a.lastIndex(of: ":"), i > a.startIndex, let port = UInt16(a[a.index(after: i)...]) {
+                            engine.wifi.connect(host: String(a[..<i]), port: port)
+                        }
+                    }
+                    .buttonStyle(GhostButton())
+                    if engine.wifi.manualAddress != nil { Button("Stop") { engine.wifi.stopManual() }.buttonStyle(GhostButton()) }
+                }
+                Text("Only needed when phones don't find each other on their own, for example on networks that block it.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.faint).fixedSize(horizontal: false, vertical: true)
+                if let line = engine.status["4-wifi"], line.contains("retrying") || line.contains("can't") {
+                    Text(line.replacingOccurrences(of: "Wi-Fi network: ", with: "")).font(.system(size: 13)).foregroundStyle(Theme.dim)
+                }
+            }
+        }
+        .onAppear { address = engine.wifi.manualAddress ?? "" }
+    }
+
+    /// Shares a check-in as plain text through another app (StatusShare), with battery and position when available.
+    private func shareStatus(_ c: CheckIn) {
+        let battery = Engine.batteryPercent, name = engine.name
+        LocationService.shared.fix { spot in share = ShareText(text: StatusShare.text(c, name: name, battery: battery, spot: spot)) }
+    }
+
+    /// This iPhone's address on its Wi-Fi network (or its hotspot), for people who type it on another phone.
+    static func localAddress() -> String? {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return nil }
+        defer { freeifaddrs(list) }
+        for p in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let i = p.pointee
+            guard let sa = i.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: i.ifa_name)
+            guard name.hasPrefix("en") || name.hasPrefix("bridge") else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                return String(cString: host)
+            }
+        }
+        return nil
+    }
+}
+
+/// The system share sheet, for "Send via another app".
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+/// Search and pair for one kind of LoRa radio (Meshtastic or MeshCore).
+struct RadioCard: View {
+    struct Radio: Identifiable { let id: UUID; let name: String }
+    enum Kind { case meshtastic, meshcore }
+    @ObservedObject var engine: Engine
+    var kind = Kind.meshtastic
     @State private var radios: [Radio] = []
     @State private var searching = false
     @State private var note = ""
 
+    private var title: String { kind == .meshtastic ? "LoRa radio · Meshtastic" : "LoRa radio · MeshCore" }
+    private var about: String {
+        kind == .meshtastic
+            ? "Reaches other radios kilometers away: about 2–10 km in a city, more from high places. Short messages only. Use a Meshtastic radio with the region set (EU_868 in Europe)."
+            : "The same kind of radio with MeshCore firmware, version 1.15 or newer. DarkProof adds a #darkproof channel to the radio and every MeshCore repeater passes it on. Short messages only. The radio's PIN is often 123456 or shown on its screen."
+    }
+    private var linked: Bool { kind == .meshtastic ? engine.radioLinked : engine.meshcoreLinked }
     private var statusText: String {
-        (engine.status["3-lora"] ?? "LoRa: no radio").replacingOccurrences(of: "LoRa: ", with: "")
+        let key = kind == .meshtastic ? "3-lora" : "3b-meshcore", prefix = kind == .meshtastic ? "LoRa: " : "MeshCore: "
+        let s = (engine.status[key] ?? prefix + "no radio").replacingOccurrences(of: prefix, with: "")
+        return s.prefix(1).uppercased() + s.dropFirst()
     }
 
     var body: some View {
-        SheetPage(title: "LoRa radio") {
-            Card {
-                HStack {
-                    Text("Radio").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+        Card {
+            HStack {
+                Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                Spacer()
+                Chip(linked ? "Linked" : "Not linked", linked ? Theme.safe : Theme.dim)
+            }
+            Text(about).font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            Text(statusText).font(.system(size: 14, weight: .semibold)).foregroundStyle(linked ? Theme.safe : Theme.text)
+            Button(searching ? "Search again" : "Search for radios") {
+                radios = []; searching = true
+                let found: (UUID, String) -> Void = { id, name in
+                    if !radios.contains(where: { $0.id == id }) { radios.append(Radio(id: id, name: name)) }
+                }
+                if kind == .meshtastic { engine.lora.scan(found: found) } else { engine.meshcore.scan(found: found) }
+            }
+            .buttonStyle(GhostButton())
+            if searching && radios.isEmpty {
+                Text("Looking for radios nearby… Turn the radio on and keep it next to the phone.")
+                    .font(.footnote).foregroundStyle(Theme.dim)
+            }
+            ForEach(radios) { r in
+                HStack(spacing: 12) {
+                    Text(r.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
                     Spacer()
-                    Chip(engine.radioLinked ? "Linked" : "Not linked", engine.radioLinked ? Theme.safe : Theme.dim)
-                }
-                Text(statusText).font(.system(size: 15)).foregroundStyle(Theme.dim)
-                Button(searching ? "Search again" : "Search for radios") {
-                    radios = []; searching = true
-                    engine.lora.scan { id, name in
-                        if !radios.contains(where: { $0.id == id }) { radios.append(Radio(id: id, name: name)) }
-                    }
-                }
-                .buttonStyle(PrimaryButton())
-                if searching && radios.isEmpty {
-                    Text("Looking for radios nearby… Turn the radio on and keep it next to the phone.")
-                        .font(.footnote).foregroundStyle(Theme.dim)
-                }
-                ForEach(radios) { r in
-                    Button {
-                        engine.lora.select(r.id)
-                        note = "Connecting. If asked, enter the PIN shown on the radio."
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                            Text(r.name).font(.system(size: 16, weight: .semibold))
-                            Spacer()
-                            Text("Connect").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.dim)
-                        }
-                        .foregroundStyle(Theme.text)
-                        .padding(16)
-                        .background(Theme.tile, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-                if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(Theme.dim) }
-            }
-            Card {
-                info("What it does", "A Meshtastic LoRa radio pairs with this iPhone over Bluetooth and reaches other radios kilometers away: about 2–10 km in a city, more in open country or from high places. Every radio also relays for the others.")
-                info("Limits", "Short messages only (about 160 characters), one every 20 seconds, and only from the last 30 minutes.")
-                info("You need", "A Meshtastic radio set to the EU_868 region, for example a Heltec V3.")
-            }
-        }
-    }
-
-    private func info(_ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
-            Text(text).font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-#if DEBUG
-/// Debug builds only: connects to the Android app's LAN test listener over TCP.
-struct LanTestView: View {
-    @ObservedObject var engine: Engine
-    @State private var address = "127.0.0.1:7777"
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ScreenTitle(title: "LAN test", subtitle: "Debug build only")
-                Card {
-                    Text("Connects over TCP to the Android app's LAN test listener, to test chat, relaying, and encryption between the two apps. This does NOT test Bluetooth or Apple peer-to-peer.")
-                        .font(.system(size: 15)).foregroundStyle(Theme.text)
-                    Text("From the iOS Simulator, 127.0.0.1:7777 reaches an Android emulator after running on the computer:\nadb -s <emulator> forward tcp:7777 tcp:7777")
-                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.dim)
-                    InputField(label: "Host:port") {
-                        TextField("", text: $address).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    }
                     Button("Connect") {
-                        let a = address.trimmingCharacters(in: .whitespaces)
-                        if let i = a.lastIndex(of: ":"), let port = UInt16(a[a.index(after: i)...]), i > a.startIndex {
-                            engine.lan.connect(host: String(a[..<i]), port: port)
-                        }
+                        if kind == .meshtastic { engine.lora.select(r.id) } else { engine.meshcore.select(r.id) }
+                        note = "Connecting. If asked, enter the PIN shown on the radio."
                     }
-                    .buttonStyle(PrimaryButton())
-                    Button("Stop LAN test") { engine.lan.stop() }.buttonStyle(GhostButton())
+                    .buttonStyle(GhostButton())
                 }
             }
-            .padding(.horizontal, 20).padding(.top, 8)
+            if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(Theme.dim) }
         }
-        .background(Theme.bg.ignoresSafeArea())
     }
 }
-#endif
+

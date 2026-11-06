@@ -28,7 +28,9 @@ final class Engine: ObservableObject {
     @Published private(set) var phones = 0        // other devices linked directly, each counted once
     @Published private(set) var bluetoothLinks = 0
     @Published private(set) var wifiLinks = 0
+    @Published private(set) var wifiNetworkLinks = 0 // phones linked over a Wi-Fi network (WifiLink)
     @Published private(set) var radioLinked = false
+    @Published private(set) var meshcoreLinked = false
     @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
     @Published private(set) var name: String
     @Published private(set) var deliveries = Deliveries()  // who confirmed which message (spec/FORMAT.md, "Delivery receipts")
@@ -51,9 +53,8 @@ final class Engine: ObservableObject {
     private var ble: BleLink!
     private var mc: MultipeerLink!
     private(set) var lora: LoraLink!
-    #if DEBUG
-    private(set) var lan: LanTestLink!
-    #endif
+    private(set) var meshcore: MeshCoreLink!
+    private(set) var wifi: WifiLink!
 
     init(name: String, code: String) {
         let d = UserDefaults.standard
@@ -73,9 +74,9 @@ final class Engine: ObservableObject {
         mc = MultipeerLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("1-mc", s) }
         ble = BleLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("2-ble", s) }
         lora = LoraLink(router: router) { [weak self] s in self?.setStatus("3-lora", s) }
-        #if DEBUG
-        lan = LanTestLink(router: router) { [weak self] s in self?.setStatus("4-lan", s) }
-        #endif
+        meshcore = MeshCoreLink(router: router) { [weak self] s in self?.setStatus("3b-meshcore", s) }
+        wifi = WifiLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("4-wifi", s) }
+        if d.object(forKey: "wifiNetwork") as? Bool ?? true { wifi.start() }
         #if DEBUG
         DebugLog.start()
         BleLink.restoredHook = { DebugLog.write("bluetooth " + $0) }
@@ -83,9 +84,16 @@ final class Engine: ObservableObject {
         mc.start()
         ble.start()
         lora.start()
+        meshcore.start()
     }
 
     var statusLines: [String] { status.keys.sorted().compactMap { status[$0] } }
+
+    /// Turns linking over Wi-Fi networks on or off (Connections screen), and remembers it.
+    func setWifi(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "wifiNetwork")
+        if on { wifi.start() } else { wifi.stop() }
+    }
 
     /// Switches to another group (or just another name) without restarting the radios: every phone relays every
     /// group anyway. Messages of the old group stay stored and come back on rejoining. Call on the main thread.
@@ -158,14 +166,11 @@ final class Engine: ObservableObject {
     private func setStatus(_ key: String, _ line: String?) {
         DispatchQueue.main.async {
             self.status[key] = line
-            let bt = self.ble.nodes, wifi = self.mc.nodes
-            var linked = Set(bt).union(wifi).count
-            #if DEBUG
-            if self.lan.linked { linked += 1 }
-            #endif
-            self.bluetoothLinks = bt.count; self.wifiLinks = wifi.count
-            self.linkedNodes = Set(bt).union(wifi)
-            self.phones = linked; self.radioLinked = self.lora.connected
+            let bt = self.ble.nodes, mc = self.mc.nodes, net = self.wifi.nodes
+            let all = Set(bt).union(mc).union(net) // a phone linked several ways counts once
+            self.bluetoothLinks = bt.count; self.wifiLinks = mc.count + net.count; self.wifiNetworkLinks = net.count
+            self.linkedNodes = all
+            self.phones = all.count; self.radioLinked = self.lora.connected; self.meshcoreLinked = self.meshcore.connected
         }
     }
 
@@ -177,11 +182,14 @@ final class Engine: ObservableObject {
             lora.offer(p)
             if !Meshtastic.fits(p) { return } // too long for the radio: not really sent
         }
+        else if peer == MeshCoreLink.peer {
+            if receipt { return }             // same rules as Meshtastic
+            meshcore.offer(p)
+            if !MeshCore.fits(p) { return }
+        }
         else if peer.hasPrefix(BleLink.prefix) { ble.send(peer, p) }
         else if peer.hasPrefix(MultipeerLink.prefix) { mc.send(peer, p) }
-        #if DEBUG
-        if peer.hasPrefix(LanTestLink.prefix) { lan.send(peer, p) }
-        #endif
+        else if peer.hasPrefix(WifiLink.prefix) { wifi.send(peer, p) }
         if newlyMine {
             idsLock.withLock { _ = marked.insert(p.id) }
             DispatchQueue.main.async { self.handedOff.insert(p.id) }

@@ -202,6 +202,27 @@ object AiContext {
     }
 }
 
+/**
+ * A check-in as plain text for other apps: satellite messengers, text messages once the network is back, anything.
+ * It leaves DarkProof unencrypted. Kept under 160 characters, the limit of satellite messengers such as Garmin inReach,
+ * with the map link last so messaging apps make it tappable. Same text as the iPhone (StatusShare.swift).
+ */
+object StatusShare {
+    fun text(c: CheckIn, name: String, battery: Int?, spot: Spot?): String {
+        val sb = StringBuilder(c.raw)
+        name.trim().take(24).takeIf { it.isNotEmpty() }?.let { sb.append(" — ").append(it) }
+        sb.append('.')
+        if (battery != null && battery in 0..100) sb.append(" Battery ").append(battery).append("%.")
+        if (spot != null && spot.isValid) {
+            val lat = String.format(Locale.ROOT, "%.5f", spot.lat); val lon = String.format(Locale.ROOT, "%.5f", spot.lon)
+            sb.append(' ').append(lat).append(", ").append(lon)
+            spot.accuracy?.takeIf { it in 0..99_999 }?.let { sb.append(" ±").append(it).append(" m") }
+            sb.append(" https://osm.org/?mlat=").append(lat).append("&mlon=").append(lon)
+        }
+        return sb.toString()
+    }
+}
+
 /** Group invites: darkproof://join?name=<name>&code=<code>. */
 object Invite {
     const val MAX_GROUP_NAME = 24

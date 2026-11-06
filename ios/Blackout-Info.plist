@@ -6,6 +6,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_blackout-mesh._tcp</string>
+		<string>_darkproof._tcp</string>
 		<string>_blackout-mesh._udp</string>
 	</array>
 	<key>CFBundleURLTypes</key>

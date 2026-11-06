@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
-        LanTest.debugIntent(this, intent) // debug builds only; does nothing in release
+        DebugTools.debugIntent(this, intent) // debug builds only; does nothing in release
         state = AppState(this)
         Notifier.setUp(this)
         OfflineMap.setUp(this)
@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(i: Intent) {
         super.onNewIntent(i)
-        LanTest.debugIntent(this, i)
+        DebugTools.debugIntent(this, i)
         link(i)
     }
 

@@ -60,12 +60,12 @@ object Meshtastic {
 }
 
 /** LoRa has very little bandwidth: only recent messages that fit, one at a time. */
-class LoraQueue(private val now: () -> Long = System::currentTimeMillis) {
+class LoraQueue(private val now: () -> Long = System::currentTimeMillis, private val maxBytes: Int = Meshtastic.PAYLOAD_MAX) {
     private val q = ArrayDeque<Packet>()
     private val sent = LinkedHashSet<String>()
     private var last = 0L
     @Synchronized fun offer(p: Packet) {
-        if (p.ts < now() - MAX_AGE_MS || p.encode().size > Meshtastic.PAYLOAD_MAX || !sent.add(p.id)) return
+        if (p.ts < now() - MAX_AGE_MS || p.encode().size > maxBytes || !sent.add(p.id)) return
         if (sent.size > 1000) sent.remove(sent.first())
         if (q.size >= MAX_QUEUE) q.removeFirst()
         q.addLast(p)

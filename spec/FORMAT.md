@@ -132,10 +132,47 @@ When a phone gets a new group message from someone else, it confirms it with a r
 | Transport | Framing |
 |---|---|
 | Nearby Connections (Android only) | Service id `it.blackout.mesh.v1`, strategy `P2P_CLUSTER`. One `BYTES` payload per packet. |
-| LAN test mode (debug builds) | 4-byte length, then the packet. |
+| Wi-Fi networks (Android and iPhone) | TCP. 4-byte length, then the frame. See below. |
 | LoRa via Meshtastic | The packet is `Data.payload` on port 256 (`PRIVATE_APP`), broadcast on channel 0 with hop limit 3. The whole packet must be ≤ 233 bytes. |
+| LoRa via MeshCore | Channel data on the `#darkproof` channel, flooded. The whole packet must be ≤ 163 bytes. See below. |
 | Bluetooth LE (Android and iPhone) | See below. |
 | Apple peer-to-peer (iPhone only) | MultipeerConnectivity. Each packet is one `.reliable` message. See below. |
+
+## Wi-Fi networks
+
+Phones on the same Wi-Fi network connect over TCP: a router with no internet, a phone hotspot, a community network or a
+long-range rooftop link. Nothing leaves that network.
+
+- **Discovery:** DNS-SD (Bonjour/mDNS), service type `_darkproof._tcp`, instance name = the node id, port = the TCP
+  port the device listens on (7777 when it is free). The iPhone lists `_darkproof._tcp` in `NSBonjourServices`.
+- **Who connects:** for a discovered device, only the device with the smaller node id connects (comparing bytes), and it
+  tries again every 10 s while there is no link. An address the user typed is always connected, and redialed every 5 s.
+- **Frames:** a 4-byte big-endian length (1–16,064), then the frame. The first frame in each direction is HELLO: the
+  ASCII bytes `DPW1`, then the node id in UTF-8 (1–64 bytes). Every later frame is one packet. A link whose first frame
+  is not a HELLO, or whose HELLO carries the receiver's own node id, is closed.
+- **Restarts and duplicate links:** a new link from a node id that already has one replaces it, and the old link is
+  closed (after a restart the old one may be dead without either side knowing). Each link is its own peer for
+  forwarding, so all stored packets go to the new link.
+- **Limits:** at most 32 links. A frame longer than the limit closes the link.
+
+## LoRa via MeshCore
+
+MeshCore radios ("companion radio" firmware 1.15 or newer, `FIRMWARE_VER_CODE` ≥ 11) pair with the phone over Bluetooth
+LE: Nordic UART service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`, the phone writes (with response) to `6E400002-…` and
+gets notifications from `6E400003-…`. One write or notification is one frame of at most 176 bytes; integers are
+little-endian. Source: github.com/meshcore-dev/MeshCore, `examples/companion_radio/MyMesh.cpp` (v1.18).
+
+- **Setup:** `16 03` (device query, protocol 3; the reply `0D` carries the firmware version code in byte 1 and the
+  number of channel slots in byte 3), then `01` + 7 zero bytes + `DarkProof` (app start; reply `05`).
+- **Channel:** DarkProof uses the hashtag channel `#darkproof`, key = the first 16 bytes of SHA-256(`#darkproof`) =
+  `835a8265454a846068f204bf5ea81bd3`. The phone reads the slots with `1F <idx>` (reply `12 <idx> <name[32]> <key[16]>`)
+  and, if none holds that key, writes it to the first empty slot with `20 <idx> <name[32]> <key[16]>`.
+- **Sending:** `3E <idx> FF <type:u16> <packet>`: channel data, flooded (`FF`), data type `0xFF44` (MeshCore's range
+  for development; to be registered before release). The packet is ≤ 163 bytes. Reply `00`.
+- **Receiving:** the radio pushes `83` when something is queued; the phone sends `0A` until the reply is `0A`. Channel
+  data arrives as `1B <snr> 00 00 <idx> <path_len> <type:u16> <len> <packet>`; only `type` `0xFF44` on the DarkProof
+  slot is read. Other frames are skipped.
+- **Pacing:** as for Meshtastic: only packets from the last 30 minutes, one every 20 s, no delivery receipts.
 
 ## Bluetooth LE
 

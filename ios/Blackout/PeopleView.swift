@@ -438,17 +438,6 @@ struct GroupSheet: View {
                 Text("Switching shows the other group's messages. This group's messages stay on the phone.")
                     .font(.footnote).foregroundStyle(Theme.dim)
             }
-            #if DEBUG
-            NavigationLink { LanTestView(engine: engine) } label: {
-                HStack {
-                    Label("LAN test (debug builds only)", systemImage: "network")
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(Theme.faint)
-                }
-                .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
-                .padding(20).background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            }
-            #endif
         }
         .onAppear { nameDraft = myName; groupDraft = groupName; saved = SavedGroups.all() }
     }

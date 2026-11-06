@@ -28,7 +28,7 @@ enum InteropTest {
         let host = String(address[..<i])
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             guard let e = Mesh.shared.engine else { DebugLog.write("interop: no group"); return }
-            e.lan.connect(host: host, port: port)
+            e.wifi.connect(host: host, port: port)
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                 let spot = Spot(lat: 45.46420, lon: 9.19000, accuracy: 12)
                 e.send(CheckIn.safe.text(battery: 64, spot: spot))

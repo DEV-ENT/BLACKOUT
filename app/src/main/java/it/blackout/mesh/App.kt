@@ -125,7 +125,8 @@ sealed class Sheet {
 }
 
 /** Phones linked directly right now (not the LoRa radio). */
-fun phonesInRange(): Int = (MeshEngine.router?.peerCount() ?: 0) - (if (MeshEngine.lora?.connected == true) 1 else 0)
+fun phonesInRange(): Int = (MeshEngine.router?.peerCount() ?: 0) - (if (MeshEngine.lora?.connected == true) 1 else 0) -
+    (if (MeshEngine.meshcore?.connected == true) 1 else 0)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -156,7 +157,7 @@ fun MainView(s: AppState, a: MainActivity) {
             SetupFlow(null, askName = false, inSheet = true) { _, group, created -> a.switchTo(group); sheet = if (created) Sheet.Invite else null }
         }
         Sheet.Settings -> SettingsSheet(s, a, { sheet = Sheet.NewGroup }, close)
-        Sheet.Radio -> RadioSheet(close)
+        Sheet.Radio -> ConnectionsSheet(s, a, close)
         is Sheet.Find -> FindSheet(sh, close)
         Sheet.AddPlace -> AddPlaceSheet(close)
         is Sheet.SendPhoto -> SendPhotoSheet(sh.jpeg, close)
@@ -242,7 +243,7 @@ private fun HomeTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<
             if (details) {
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.line))
                 val lines = listOfNotNull("Nearby: " + MeshEngine.transportStatus, MeshEngine.ble?.statusLine() ?: "Bluetooth LE: off",
-                    MeshEngine.lora?.status ?: "LoRa: no radio", LanTest.statusLine())
+                    MeshEngine.lora?.status ?: "LoRa: no radio", MeshEngine.meshcore?.status, MeshEngine.wifi?.links?.statusLine() ?: "Wi-Fi network: off")
                 lines.forEach { Txt(it, 13, color = Theme.dim) }
             }
         }
@@ -255,7 +256,7 @@ private fun HomeTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<
             ActionTile("I'm safe", R.drawable.ic_verified_user, Theme.safe, true, Modifier.weight(1f)) { checkIn(a, s, CheckIn.SAFE) }
             ActionTile("Need help", R.drawable.ic_sos, Theme.help, true, Modifier.weight(1f)) { confirmHelp = true }
             ActionTile("Invite", R.drawable.ic_qr_code_2, Theme.text, false, Modifier.weight(1f)) { open(Sheet.Invite) }
-            ActionTile("Radio", R.drawable.ic_settings_input_antenna, Theme.text, false, Modifier.weight(1f)) { open(Sheet.Radio) }
+            ActionTile("Connect", R.drawable.ic_settings_input_antenna, Theme.text, false, Modifier.weight(1f)) { open(Sheet.Radio) }
         }
         mine?.let { m -> Txt("Your last check-in: ${if (CheckIn.of(m.text) == CheckIn.HELP) "need help" else "safe"}, ${ago(m.ts)}.", 15, color = Theme.dim) }
         SectionTitle("Your people", if (people.size > 3) "See all" else null) { s.tab = 3 }
@@ -345,7 +346,6 @@ private fun GroupsSheet(g: SavedGroup, a: MainActivity, invite: () -> Unit, add:
 @Composable
 private fun SettingsSheet(s: AppState, a: MainActivity, add: () -> Unit, close: () -> Unit) {
     var name by remember { mutableStateOf(s.name) }
-    val debugPanel = remember { LanTest.panel(a) }
     val tick = s.tick
     SheetPage("Settings", close) {
         InputField("Your name", name, { name = it.take(40) }, keyboard = KeyboardOptions(KeyboardCapitalization.Words))
@@ -380,45 +380,125 @@ private fun SettingsSheet(s: AppState, a: MainActivity, add: () -> Unit, close: 
             }
         }
         SecondaryButton("Join or start another group", icon = R.drawable.ic_add) { add() }
-        if (debugPanel != null) Card {
-            Txt("LAN test (debug build only)", 16, FontWeight.SemiBold)
-            AndroidView({ debugPanel }, Modifier.fillMaxWidth())
+    }
+}
+
+/** Every way messages travel, in one place: what is linked now, switches, pairing, and other apps. */
+@Composable
+private fun ConnectionsSheet(s: AppState, a: MainActivity, close: () -> Unit) {
+    val tick = s.tick
+    val ctx = LocalContext.current
+    SheetPage("Connections", close) {
+        Txt("The ways your messages travel. None of them needs internet.", 15, color = Theme.dim)
+        key(tick) {
+            val phones = phonesInRange()
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Txt("Nearby phones", 18, FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Chip(if (phones > 0) "$phones linked" else "Searching", if (phones > 0) Theme.safe else Theme.dim)
+                }
+                Txt("Phones with DarkProof within about 10–50 m connect by themselves, over Bluetooth and Wi-Fi Direct.", 15, color = Theme.dim)
+                Txt("Nearby: ${MeshEngine.transportStatus} · ${MeshEngine.ble?.statusLine() ?: "Bluetooth LE: off"}", 13, color = Theme.faint)
+            }
+            WifiCard()
+            RadioCard("LoRa radio · Meshtastic",
+                "Reaches other radios kilometers away: about 2–10 km in a city, more from high places. Short messages only. Use a Meshtastic radio with the region set (EU_868 in Europe).",
+                MeshEngine.lora?.status?.removePrefix("LoRa: "), MeshEngine.lora?.connected == true,
+                MeshEngine.lora?.let { l -> { found: (String, String) -> Unit -> l.scan(found) } }, { MeshEngine.lora?.select(it) })
+            RadioCard("LoRa radio · MeshCore",
+                "The same kind of radio with MeshCore firmware, version 1.15 or newer. DarkProof adds a #darkproof channel to the radio and every MeshCore repeater passes it on. Short messages only. The radio's PIN is often 123456 or shown on its screen.",
+                MeshEngine.meshcore?.status?.removePrefix("MeshCore: "), MeshEngine.meshcore?.connected == true,
+                MeshEngine.meshcore?.let { l -> { found: (String, String) -> Unit -> l.scan(found) } }, { MeshEngine.meshcore?.select(it) })
+        }
+        Card {
+            Txt("Send via another app", 18, FontWeight.Bold)
+            Txt("For satellite messengers such as Garmin inReach or Zoleo, text messages once the network is back, or any app. It includes your battery and, if location is on, where you are. It leaves DarkProof: that app decides who can read it.", 15, color = Theme.dim)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Share “I'm safe”") { shareStatus(a, s, CheckIn.SAFE) }
+                GhostButton("Share “I need help”") { shareStatus(a, s, CheckIn.HELP) }
+            }
         }
     }
 }
 
+/** Links over Wi-Fi networks: on/off, what is linked, this phone's address, and an address to dial by hand. */
 @Composable
-private fun RadioSheet(close: () -> Unit) {
+private fun WifiCard() {
+    val ctx = LocalContext.current
+    val wifi = MeshEngine.wifi
+    var address by remember { mutableStateOf(wifi?.links?.manual ?: "") }
+    Card {
+        SwitchRow("Wi-Fi network", wifi != null, { MeshEngine.setWifi(it) },
+            "Phones on the same Wi-Fi find each other: a router with no internet, a phone hotspot, a neighbourhood network or a long-range rooftop link.")
+        if (wifi != null) {
+            val n = wifi.links.linkCount()
+            Txt(if (n > 0) "$n phone${if (n == 1) "" else "s"} linked over Wi-Fi" else "Looking on this network", 15, FontWeight.SemiBold, if (n > 0) Theme.safe else Theme.dim)
+            localAddress()?.let { ip -> if (wifi.links.port > 0) Txt("This phone: $ip:${wifi.links.port}", 14, color = Theme.dim) }
+            InputField("Connect to an address", address, { address = it.trim() }, "192.168.1.20:7777")
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Connect") {
+                    val host = address.substringBeforeLast(':', ""); val port = address.substringAfterLast(':').toIntOrNull()
+                    if (host.isEmpty() || port == null || port !in 1..65535) Toast.makeText(ctx, "Type it as address:port, for example 192.168.1.20:7777", Toast.LENGTH_LONG).show()
+                    else wifi.links.connectManually(host, port)
+                }
+                if (wifi.links.manual != null) GhostButton("Stop") { wifi.links.stopManual() }
+            }
+            Txt("Only needed when phones don't find each other on their own, for example on networks that block it.", 13, color = Theme.faint)
+            wifi.links.note.takeIf { it.isNotEmpty() }?.let { Txt(it.replaceFirstChar { c -> c.uppercase() }, 13, color = Theme.dim) }
+        }
+    }
+}
+
+/** Search and pair for one kind of LoRa radio. [scan] is null until the radio link is ready. */
+@Composable
+private fun RadioCard(title: String, about: String, status: String?, linked: Boolean,
+                      scan: ((found: (String, String) -> Unit) -> Unit)?, select: (String) -> Unit) {
     val found = remember { mutableStateListOf<Pair<String, String>>() }
     var scanning by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
-    LaunchedEffect(scanning) { if (scanning) { kotlinx.coroutines.delay(15_500); scanning = false; searched = true } } // LoraLink scans for 15 s
+    LaunchedEffect(scanning) { if (scanning) { kotlinx.coroutines.delay(15_500); scanning = false; searched = true } } // radios scan for 15 s
     val ctx = LocalContext.current
-    SheetPage("LoRa radio", close) {
-        Card {
-            Txt(MeshEngine.lora?.status?.removePrefix("LoRa: ")?.replaceFirstChar { it.uppercase() } ?: "No radio", 18, FontWeight.Bold,
-                if (MeshEngine.lora?.connected == true) Theme.safe else Theme.text)
-            Txt("A Meshtastic radio carries messages for kilometers. Use one with the region already set (EU_868 in Europe). Turn it on near the phone.", 15, color = Theme.dim)
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Txt(title, 18, FontWeight.Bold, modifier = Modifier.weight(1f))
+            Chip(if (linked) "Linked" else "Not linked", if (linked) Theme.safe else Theme.dim)
         }
-        PrimaryButton(if (scanning) "Searching…" else "Search for radios", enabled = !scanning) {
-            if (MeshEngine.lora == null) { Toast.makeText(ctx, "DarkProof is still starting. Try again in a moment.", Toast.LENGTH_LONG).show(); return@PrimaryButton }
+        Txt(about, 15, color = Theme.dim)
+        status?.let { Txt(it.replaceFirstChar { c -> c.uppercase() }, 14, FontWeight.SemiBold, if (linked) Theme.safe else Theme.text) }
+        GhostButton(if (scanning) "Searching…" else "Search for radios", enabled = !scanning) {
+            if (scan == null) { Toast.makeText(ctx, "DarkProof is still starting. Try again in a moment.", Toast.LENGTH_LONG).show(); return@GhostButton }
             scanning = true; searched = false; found.clear()
-            MeshEngine.lora?.scan { addr, nm -> if (found.none { it.first == addr }) found += addr to nm }
+            scan { addr, nm -> if (found.none { it.first == addr }) found += addr to nm }
         }
-        if (scanning && found.isEmpty()) Txt("Looking for radios nearby… Turn the radio on and keep it next to the phone.", 15, color = Theme.dim)
-        if (searched && found.isEmpty()) Txt("No radio found. Turn it on, keep it next to the phone and search again.", 15, color = Theme.dim)
-        if (found.isNotEmpty()) Card(padding = 16.dp) {
-            found.forEach { (addr, nm) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Txt(nm, 17, FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    GhostButton("Connect") {
-                        MeshEngine.lora?.select(addr)
-                        Toast.makeText(ctx, "Connecting: if asked, enter the PIN shown on the radio", Toast.LENGTH_LONG).show()
-                        close()
-                    }
+        if (scanning && found.isEmpty()) Txt("Looking for radios nearby… Turn the radio on and keep it next to the phone.", 14, color = Theme.dim)
+        if (searched && found.isEmpty()) Txt("No radio found. Turn it on, keep it next to the phone and search again.", 14, color = Theme.dim)
+        found.forEach { (addr, nm) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Txt(nm, 16, FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                GhostButton("Connect") {
+                    select(addr)
+                    Toast.makeText(ctx, "Connecting: if asked, enter the PIN shown on the radio", Toast.LENGTH_LONG).show()
                 }
             }
         }
+    }
+}
+
+/** This phone's address on its Wi-Fi network, for people who type it on another phone. */
+private fun localAddress(): String? = runCatching {
+    java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }.firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
+}.getOrNull()
+
+/** Shares a check-in as plain text through another app (StatusShare), with battery and position when available. */
+fun shareStatus(a: MainActivity, s: AppState, c: CheckIn) {
+    val battery = batteryPercent(a)
+    fun go(spot: Spot?) = a.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+        .putExtra(Intent.EXTRA_TEXT, StatusShare.text(c, s.name, battery, spot)), "Send via"))
+    val last = Locator.lastKnown(a)
+    when {
+        last != null || !Locator.allowed(a) -> go(last)
+        else -> { Toast.makeText(a, "Finding your position…", Toast.LENGTH_SHORT).show(); Locator.fix(a) { go(it) } }
     }
 }
 

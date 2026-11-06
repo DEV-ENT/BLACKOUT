@@ -22,6 +22,7 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
   - **Check-ins** ("I'm safe", "I need help") carry your battery level.
   - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
   - **Delivery receipts:** your phone tells your group which of their messages it received, so they can see "Delivered". Receipts are encrypted for your group too.
+- **Send via another app**, only when you tap Share "I'm safe" or Share "I need help" (Connections screen): DarkProof hands the app you pick a short plain-text message with your name, battery and, if location is allowed, your position. It is not encrypted: that app, and whoever receives it, can read it.
 - **Wi-Fi board (Android only).** When you turn it on, anyone who joins your phone's Wi-Fi network can read Public channel messages and post new ones from a browser. Group messages are never shown there.
 DarkProof uses the internet only in these two cases, and never needs it to work:
 
@@ -31,7 +32,7 @@ DarkProof uses the internet only in these two cases, and never needs it to work:
 ## Permissions
 
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
-- **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
+- **Local network**: for Wi-Fi peer-to-peer connections between iPhones, and to find and link DarkProof phones on the same Wi-Fi network (router, hotspot or community network). Messages on these links are encrypted like everywhere else; nothing goes to the internet.
 - **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose. On Android, photos come only from the system photo picker, with no camera or photo library permission.
 - **Add to Photos (iPhone, optional)**: only if you save a photo from the chat.
 - **Notifications (optional)**: alerts for new group messages and check-ins, made on your phone. No push server is involved and nothing is sent to Apple, Google or us.

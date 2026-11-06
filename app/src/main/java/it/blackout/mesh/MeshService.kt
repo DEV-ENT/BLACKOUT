@@ -49,12 +49,13 @@ class MeshService : Service() {
         svc = "it.blackout.mesh.v1" // the same for every DarkProof phone: all relay for each other (spec/FORMAT.md)
         client = Nearby.getConnectionsClient(this)
         val lora = LoraLink(this); MeshEngine.lora = lora; lora.start()
+        val meshcore = MeshCoreLink(this); MeshEngine.meshcore = meshcore; meshcore.start()
         val ble = BleLink(this, MeshEngine.deviceId); MeshEngine.ble = ble
         MeshEngine.sender = { peer, p ->
             when {
                 peer == LoraLink.PEER -> lora.offer(p)
+                peer == MeshCoreLink.PEER -> meshcore.offer(p)
                 BleLink.owns(peer) -> ble.send(peer, p)
-                LanTest.owns(peer) -> LanTest.send(peer, p) // debug builds only; always false in release
                 else -> client.sendPayload(peer, Payload.fromBytes(p.encode()))
             }
         }

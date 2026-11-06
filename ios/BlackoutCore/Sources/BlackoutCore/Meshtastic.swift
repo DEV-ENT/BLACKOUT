@@ -101,11 +101,15 @@ public final class LoraQueue: @unchecked Sendable { // state guarded by `lock`
     private var sentSet = Set<String>()
     private var last: Int64 = 0
 
-    public init(now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) { self.now = now }
+    private let maxBytes: Int
+
+    public init(maxBytes: Int = Meshtastic.payloadMax, now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) {
+        self.maxBytes = maxBytes; self.now = now
+    }
 
     public func offer(_ p: Packet) {
         lock.lock(); defer { lock.unlock() }
-        guard p.ts >= now() - Self.maxAgeMs, p.encode().count <= Meshtastic.payloadMax, sentSet.insert(p.id).inserted else { return }
+        guard p.ts >= now() - Self.maxAgeMs, p.encode().count <= maxBytes, sentSet.insert(p.id).inserted else { return }
         sent.append(p.id)
         if sent.count > 1000 { sentSet.remove(sent.removeFirst()) }
         if q.count >= Self.maxQueue { q.removeFirst() }

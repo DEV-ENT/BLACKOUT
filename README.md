@@ -20,7 +20,14 @@ There are two apps that work together: one for **Android** and one for **iPhone*
   | Google Nearby Connections (Bluetooth and Wi-Fi Direct) | ✓ | |
   | Bluetooth LE, so Android and iPhone can talk to each other | ✓ | ✓ |
   | Apple peer-to-peer (MultipeerConnectivity) | | ✓ |
+  | Wi-Fi networks: a router with no internet, a hotspot, a community network or a rooftop link | ✓ | ✓ |
   | LoRa through a Meshtastic radio (EU 868 MHz), over Bluetooth | ✓ | ✓ |
+  | LoRa through a MeshCore radio (firmware 1.15 or newer), over Bluetooth | ✓ | ✓ |
+
+  The **Connections** screen shows all of them: what is linked now, an on/off switch for Wi-Fi networks, an address to
+  type when phones don't find each other, and pairing for both kinds of radio. **Send via another app** shares an
+  "I'm safe" or "I need help" (with battery and position) as plain text, for satellite messengers such as Garmin
+  inReach, or for text messages once the network is back.
 
 - **AI that runs on the phone.** It needs no internet once its model is downloaded.
   - **iPhone:** runs on llama.cpp. You pick the model in the app, and it keeps the conversation as context.
@@ -40,7 +47,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **Android extras:**
   - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.
   - **Wi-Fi board:** the phone opens its own Wi-Fi network and a web page, so people without the app can read and post Public messages from a browser.
-- **LAN test mode (debug builds only).** Emulators and simulators can exchange real app traffic over TCP. This tests chat, relaying and encryption, but not Bluetooth.
+- **Testing on a computer.** An Android emulator and an iPhone Simulator link over the Wi-Fi network transport: run `adb forward tcp:7778 tcp:7777`, then type `127.0.0.1:7778` in the iPhone's Connections screen. Debug builds also have test hooks (sample messages, an AI self-test).
 
 ## Repository layout
 
@@ -121,9 +128,9 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 
 **Verified:**
 - All unit tests pass.
-- Chat, relaying and encryption between two Android emulators, both over the LAN test mode and over the emulators' simulated Bluetooth LE.
-- An iPhone Simulator chatting with an Android emulator over the LAN test mode.
-- An iPhone Simulator and an Android emulator in one group, over the LAN test mode: check-ins with battery and position, places, photos and delivery status in both directions; an Android invite QR and link; messages written while offline arriving after reconnecting.
+- Chat, relaying and encryption between two Android emulators, both over a TCP test link and over the emulators' simulated Bluetooth LE.
+- An iPhone Simulator and an Android emulator linked over the Wi-Fi network transport (address typed by hand, as on networks that block discovery).
+- An iPhone Simulator and an Android emulator in one group, over a TCP link: check-ins with battery and position, places, photos and delivery status in both directions; an Android invite QR and link; messages written while offline arriving after reconnecting.
 - On an Android emulator: the offline map saved, then shown with airplane mode on; alerts while the app is in the background; picking and sending a photo.
 - The Android AI on an emulator: downloading and checking Gemma 4 E2B, answering the same test questions as the iPhone (including a follow-up and a question about the group), and falling back to the CPU when the GPU can't run.
 - Two iPhone Simulators connecting over Apple peer-to-peer.
@@ -136,6 +143,8 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 **Not verified yet:**
 - Android on real phones, including sending the app to another phone and a real phone joining the Wi-Fi board.
 - The Android AI on a real phone, including its GPU.
+- Wi-Fi network discovery between real phones (Bonjour/mDNS); the emulator and the Simulator can't see each other's announcements.
+- MeshCore radios: built from MeshCore's source code and tested byte by byte, but never connected to a real radio.
 - iPhone and Android over real Bluetooth.
 - iPhone to iPhone on real devices.
 - LoRa with real Meshtastic radios.
