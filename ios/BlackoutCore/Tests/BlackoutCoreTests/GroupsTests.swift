@@ -70,4 +70,32 @@ final class GroupsTests: XCTestCase {
         XCTAssertEqual(p.first?.checkIn, .safe)
         XCTAssertEqual(p.first?.checkInTs, 200)
     }
+
+    func testCheckInBattery() {
+        let safe = CheckIn.safe.text(battery: 23)
+        XCTAssertEqual(safe, "✅ I'm safe · 🔋 23%")
+        XCTAssertEqual(CheckIn.of(safe), .safe)
+        XCTAssertEqual(CheckIn.battery(in: safe), 23)
+        XCTAssertEqual(CheckIn.battery(in: CheckIn.help.text(battery: 0)), 0)
+        XCTAssertEqual(CheckIn.battery(in: CheckIn.help.text(battery: 100)), 100)
+        XCTAssertEqual(CheckIn.safe.text(battery: nil), CheckIn.safe.rawValue)  // unknown (e.g. Simulator)
+        XCTAssertEqual(CheckIn.safe.text(battery: 150), CheckIn.safe.rawValue)  // out of range: left out
+        XCTAssertNil(CheckIn.battery(in: CheckIn.safe.rawValue))                // older apps send none
+        XCTAssertNil(CheckIn.battery(in: "Phone at 🔋 50%"))                      // not a check-in
+        XCTAssertNil(CheckIn.battery(in: "✅ I'm safe · 🔋 101%"))
+        XCTAssertNil(CheckIn.battery(in: "✅ I'm safe · 🔋 low"))
+        XCTAssertNil(CheckIn.battery(in: "✅ I'm safe · 🔋 5"))
+        XCTAssertEqual(CheckIn.battery(in: "🆘 trapped, 🔋 9% left · 🔋 8%"), 8)  // the last one counts
+    }
+
+    func testPersonBatteryFollowsLatestCheckIn() {
+        let p = Person.all(in: [
+            m("a", "Ann", 100, CheckIn.safe.text(battery: 80)),
+            m("a", "Ann", 200, CheckIn.help.text(battery: 12)),
+            m("a", "Ann", 300, "walking to the school"),
+        ], me: "me")
+        XCTAssertEqual(p.first?.battery, 12)
+        let old = Person.all(in: [m("b", "Bob", 100, CheckIn.safe.text(battery: 80)), m("b", "Bob", 200, CheckIn.safe.rawValue)], me: "me")
+        XCTAssertNil(old.first?.battery) // the latest check-in had no level: don't show a stale one
+    }
 }

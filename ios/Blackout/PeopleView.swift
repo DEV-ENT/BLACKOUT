@@ -9,10 +9,20 @@ extension CheckIn {
 }
 
 extension Engine {
-    /// Sends a check-in to the group, with a haptic.
+    /// Sends a check-in to the group with this phone's battery level, and a haptic.
     func checkIn(_ c: CheckIn) {
-        send(c.rawValue)
+        send(c.text(battery: Self.batteryPercent))
         UINotificationFeedbackGenerator().notificationOccurred(c == .safe ? .success : .warning)
+    }
+
+    /// This phone's battery level, or nil when unknown (the Simulator has none).
+    static var batteryPercent: Int? {
+        #if DEBUG
+        if let v = UserDefaults.standard.object(forKey: "debugBattery") as? Int { return v } // simctl spawn ... defaults write
+        #endif
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let level = UIDevice.current.batteryLevel
+        return level < 0 ? nil : Int((level * 100).rounded())
     }
 
     /// Your own most recent check-in in this group.
@@ -199,10 +209,31 @@ struct PersonRow: View {
                 Text(status.0).font(.system(size: 14, weight: .medium)).foregroundStyle(status.1)
             }
             Spacer(minLength: 8)
-            if inRange { Chip("Nearby") }
+            VStack(alignment: .trailing, spacing: 6) {
+                if inRange { Chip("Nearby") }
+                if let b = person.battery { BatteryLabel(percent: b) }
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Battery level from someone's check-in. Red at 20% or less: their phone may soon go off.
+struct BatteryLabel: View {
+    let percent: Int
+
+    var body: some View {
+        let low = percent <= 20
+        HStack(spacing: 4) {
+            Image(systemName: percent <= 10 ? "battery.0percent" : percent <= 35 ? "battery.25percent" :
+                    percent <= 60 ? "battery.50percent" : percent <= 85 ? "battery.75percent" : "battery.100percent")
+            Text("\(percent)%")
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(low ? Theme.help : Theme.dim)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Battery \(percent) percent")
     }
 }
 

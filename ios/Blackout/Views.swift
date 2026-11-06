@@ -396,7 +396,7 @@ struct ChatView: View {
                                 let time = Self.time.string(from: Date(timeIntervalSince1970: Double(m.ts) / 1000))
                                 Group {
                                     if let c = CheckIn.of(m.text) {
-                                        CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time)
+                                        CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time, battery: CheckIn.battery(in: m.text))
                                     } else {
                                         Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil, time: time)
                                     }
@@ -495,6 +495,7 @@ struct CheckInRow: View {
     let checkIn: CheckIn
     let name: String? // nil = you
     let time: String
+    var battery: Int? = nil
 
     var body: some View {
         let safe = checkIn == .safe
@@ -503,6 +504,7 @@ struct CheckInRow: View {
             Text(name.map { safe ? "\($0) is safe" : "\($0) needs help" } ?? (safe ? "You're safe" : "You asked for help"))
                 .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
             Spacer()
+            if let battery { BatteryLabel(percent: battery) }
             Text(time).font(.system(size: 13)).foregroundStyle(Theme.dim)
         }
         .padding(.horizontal, 16).padding(.vertical, 14)

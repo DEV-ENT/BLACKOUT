@@ -44,6 +44,22 @@ public enum CheckIn: String, Sendable {
     case help = "🆘 I need help"
 
     public static func of(_ text: String) -> CheckIn? { text.hasPrefix("✅") ? .safe : text.hasPrefix("🆘") ? .help : nil }
+
+    /// The message to send, with the phone's battery level when known: "✅ I'm safe · 🔋 23%".
+    public func text(battery: Int?) -> String {
+        guard let b = battery, (0...100).contains(b) else { return rawValue }
+        return "\(rawValue) · 🔋 \(b)%"
+    }
+
+    /// The battery level (0–100) a check-in carries, if any.
+    public static func battery(in text: String) -> Int? {
+        guard of(text) != nil, let r = text.range(of: "🔋 ", options: .backwards) else { return nil }
+        let rest = text[r.upperBound...]
+        let digits = rest.prefix { $0.isASCII && $0.isNumber }
+        guard !digits.isEmpty, digits.count <= 3, rest.dropFirst(digits.count).hasPrefix("%"),
+              let n = Int(digits), n <= 100 else { return nil }
+        return n
+    }
 }
 
 /// Someone in your group, known from the messages they sent.
@@ -53,6 +69,8 @@ public struct Person: Identifiable, Equatable, Sendable {
     public var lastTs: Int64
     public var checkIn: CheckIn?
     public var checkInTs: Int64 = 0
+    /// Battery level from their latest check-in, if it carried one.
+    public var battery: Int? = nil
 
     /// Everyone who wrote in the group (not on the Public channel, not from a Wi-Fi board), people asking for help
     /// first, then the most recently heard.
@@ -61,7 +79,7 @@ public struct Person: Identifiable, Equatable, Sendable {
         for m in messages where !m.isPublic && m.sender != me && !m.sender.hasPrefix("web-") {
             var p = byId[m.sender] ?? Person(id: m.sender, name: m.name, lastTs: m.ts)
             if m.ts >= p.lastTs { p.lastTs = m.ts; p.name = m.name }
-            if let c = CheckIn.of(m.text), m.ts >= p.checkInTs { p.checkIn = c; p.checkInTs = m.ts }
+            if let c = CheckIn.of(m.text), m.ts >= p.checkInTs { p.checkIn = c; p.checkInTs = m.ts; p.battery = CheckIn.battery(in: m.text) }
             byId[m.sender] = p
         }
         return byId.values.sorted { ($0.checkIn == .help ? 1 : 0, $0.lastTs) > ($1.checkIn == .help ? 1 : 0, $1.lastTs) }

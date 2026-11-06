@@ -61,7 +61,11 @@ A check-in is an ordinary group message, so apps that don't know check-ins still
 - `✅ I'm safe` means safe. Any message whose text starts with `✅` counts as "safe".
 - `🆘 I need help` means needs help. Any message whose text starts with `🆘` counts as "needs help".
 
-A person's status is their most recent check-in.
+A check-in may end with ` · 🔋 NN%`: the sender's battery level (0 to 100) when they sent it, for example
+`✅ I'm safe · 🔋 23%`. Apps read the last `🔋 ` in a check-in, followed by 1 to 3 ASCII digits and `%`; anything
+else means no battery level. Apps that don't know it just show the text.
+
+A person's status is their most recent check-in, and so is their battery level.
 
 ## Forwarding rules
 
