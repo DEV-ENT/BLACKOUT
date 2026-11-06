@@ -23,13 +23,16 @@ class MeshService : Service() {
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
+        Notifier.setUp(this) // message alerts also when no screen is open
         val ch = "mesh"
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(ch, "Network", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, ch).setContentTitle("DarkProof active").setContentText("Relaying messages")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth).setContentIntent(open).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) else startForeground(1, n)
-        val name = i?.getStringExtra("name"); val code = i?.getStringExtra("code")
+        // The saved group wins over the intent: Android may redeliver an old intent after the user switched groups.
+        val prefs = getSharedPreferences("mesh", 0)
+        val name = prefs.getString("name", null) ?: i?.getStringExtra("name"); val code = prefs.getString("code", null) ?: i?.getStringExtra("code")
         if (!started && name != null && code != null) {
             started = true
             io.execute {

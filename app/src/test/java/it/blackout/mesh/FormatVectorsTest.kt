@@ -28,7 +28,7 @@ class FormatVectorsTest {
 
     @Test fun sealProducesIdenticalPacket() = vectors.filter { it["kind"] == "seal" }.forEach { v ->
         val id = v["id"]!!; val ts = v["ts"]!!.toLong()
-        val cipher = GroupCrypto(code(v)).seal(id, ts, v["sender"]!!, v["name"]!!, v["text"]!!, unhex(v["iv"]!!))
+        val cipher = GroupCrypto(code(v)).seal(id, ts, v["sender"]!!, v["name"]!!, v["text"]!!, iv = unhex(v["iv"]!!))
         assertEquals(v["name"], v["packet"], hex(Packet(id, ts, v["ttl"]!!.toInt(), cipher).encode()))
     }
 

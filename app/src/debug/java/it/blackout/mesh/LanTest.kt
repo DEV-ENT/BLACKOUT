@@ -1,6 +1,13 @@
 package it.blackout.mesh
 
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import java.io.ByteArrayOutputStream
 import android.graphics.Color
 import android.view.View
 import android.widget.Button
@@ -68,7 +75,7 @@ class LanTransport(private val router: () -> MeshRouter?, private val changed: (
     fun listen(port: Int) {
         if (!listening.compareAndSet(false, true)) return
         thread(isDaemon = true, name = "lan-listen") {
-            val ss = try { ServerSocket(port) } catch (e: IOException) {
+            val ss = try { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) } } catch (e: IOException) {
                 listening.set(false); update("can't listen on port $port: ${e.message}"); return@thread
             }
             server = ss; update("")
@@ -152,6 +159,34 @@ object LanTest {
     fun send(peer: String, p: Packet) = lan.send(peer, p)
     fun linkCount() = lan.linkCount()
     fun statusLine() = lan.statusLine()
+    fun log(s: String) { Log.i("DarkProof", s) }
+
+    private val main = Handler(Looper.getMainLooper())
+    private fun whenStarted(f: () -> Unit) { if (MeshEngine.router != null) f() else main.postDelayed({ whenStarted(f) }, 500) }
+
+    /**
+     * Mixed-group test hooks, e.g.
+     * adb shell am start -n it.darkproof.mesh/it.blackout.mesh.MainActivity --es join "Ann|<code>" --es lan listen
+     * then --es samples 1 to send a check-in with battery and position, a place, a photo and a text.
+     */
+    fun debugIntent(c: Context, i: Intent) {
+        i.getStringExtra("join")?.let { j ->
+            c.getSharedPreferences("mesh", 0).edit().putString("name", j.substringBefore('|')).putString("code", j.substringAfter('|')).apply()
+        }
+        log("debug intent: lan=${i.getStringExtra("lan")} samples=${i.getStringExtra("samples")} started=${MeshEngine.router != null}")
+        if (i.getStringExtra("lan") == "listen") whenStarted { log("lan: listening on $PORT"); lan.listen(PORT) }
+        if (i.getStringExtra("samples") != null) whenStarted {
+            val spot = Spot(45.46600, 9.19200, 8)
+            MeshEngine.send(CheckIn.SAFE.text(81, spot))
+            MeshEngine.send(Place(PlaceKind.SHELTER, "Gym open all night", spot).text, public = true)
+            val bmp = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).apply { drawColor(Color.rgb(230, 140, 40)); drawCircle(160f, 120f, 70f, android.graphics.Paint().apply { color = Color.WHITE }) }
+            val jpeg = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 60, it) }.toByteArray()
+            MeshEngine.send(Photo.text("From Android"), photo = jpeg)
+            MeshEngine.send("Hello from Android")
+            log("interop: sent check-in, place, photo (${jpeg.size} bytes), text")
+        }
+    }
 
     fun panel(c: Context): View? = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL

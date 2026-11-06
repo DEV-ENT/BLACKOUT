@@ -3,6 +3,7 @@ package it.blackout.mesh
 import java.io.*
 import java.security.SecureRandom
 import javax.crypto.Cipher
+import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -39,17 +40,26 @@ class Packet(val id: String, val ts: Long, val ttl: Int, val cipher: ByteArray) 
     }
 }
 
-/** [public]: sent on the Public channel (spec/FORMAT.md), readable by everyone. */
-data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String, val public: Boolean = false)
+/** [public]: sent on the Public channel (spec/FORMAT.md), readable by everyone. [photo]: a small JPEG, or null. */
+data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String,
+                   val public: Boolean = false, val photo: ByteArray? = null)
 
-class GroupCrypto(code: String) {
-    private val key = SecretKeySpec(deriveKey(code), "AES")
+class GroupCrypto private constructor(private val keyBytes: ByteArray) {
+    constructor(code: String) : this(deriveKey(code))
+    private val key = SecretKeySpec(keyBytes, "AES")
     private val rnd = SecureRandom()
 
-    /** [iv] is random in normal use; tests pass a fixed one to reproduce spec/test-vectors.txt. */
-    fun seal(id: String, ts: Long, sender: String, name: String, text: String,
+    /** The group's delivery-receipt key (spec/FORMAT.md, "Delivery receipts"). */
+    fun receipts() = GroupCrypto(deriveReceiptKey(keyBytes))
+
+    /** [iv] is random in normal use; tests pass a fixed one to reproduce spec/test-vectors.txt. [photo]: 4th field. */
+    fun seal(id: String, ts: Long, sender: String, name: String, text: String, photo: ByteArray? = null,
              iv: ByteArray = ByteArray(12).also(rnd::nextBytes)): ByteArray {
-        val plain = ByteArrayOutputStream().also { b -> b.putStr(sender); b.putStr(name); b.putStr(text) }.toByteArray()
+        require(photo == null || photo.size <= Photo.MAX_BYTES) { "photo too big" }
+        val plain = ByteArrayOutputStream().also { b ->
+            b.putStr(sender); b.putStr(name); b.putStr(text)
+            if (photo != null) b.putBytes(byteArrayOf(Photo.JPEG) + photo)
+        }.toByteArray()
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv)); c.updateAAD("$id|$ts".toByteArray())
         return iv + c.doFinal(plain)
@@ -59,7 +69,10 @@ class GroupCrypto(code: String) {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, p.cipher, 0, 12)); c.updateAAD("${p.id}|${p.ts}".toByteArray())
         DataInputStream(ByteArrayInputStream(c.doFinal(p.cipher, 12, p.cipher.size - 12))).run {
-            Message(p.id, p.ts, getStr(), getStr(), getStr())
+            val sender = getStr(); val name = getStr(); val text = getStr()
+            val extra = if (available() >= 2) runCatching { getBytes() }.getOrNull() else null // older apps send none
+            val photo = extra?.takeIf { it.size > 1 && it[0] == Photo.JPEG && it.size - 1 <= Photo.MAX_BYTES }?.copyOfRange(1, extra.size)
+            Message(p.id, p.ts, sender, name, text, photo = photo)
         }
     } catch (_: Exception) { null }
 
@@ -71,12 +84,21 @@ class GroupCrypto(code: String) {
         fun deriveKey(code: String): ByteArray = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             .generateSecret(PBEKeySpec(java.text.Normalizer.normalize(code, java.text.Normalizer.Form.NFC).toCharArray(),
                 "blackout-mesh-v1".toByteArray(), 120_000, 256)).encoded
+        /** HKDF-SHA256 (RFC 5869) of the group key, no salt, info "darkproof-receipt-v1", 32 bytes. */
+        fun deriveReceiptKey(groupKey: ByteArray): ByteArray {
+            val prk = Mac.getInstance("HmacSHA256").run { init(SecretKeySpec(ByteArray(32), "HmacSHA256")); doFinal(groupKey) }
+            return Mac.getInstance("HmacSHA256").run {
+                init(SecretKeySpec(prk, "HmacSHA256")); update("darkproof-receipt-v1".toByteArray()); doFinal(byteArrayOf(1))
+            }
+        }
         /** Text field: 2-byte big-endian length, then standard UTF-8 (not Java's modified UTF-8, so other platforms can read it). */
-        private fun ByteArrayOutputStream.putStr(s: String) {
-            val b = s.toByteArray(Charsets.UTF_8); require(b.size <= 0xFFFF) { "text field too long" }
+        private fun ByteArrayOutputStream.putStr(s: String) = putBytes(s.toByteArray(Charsets.UTF_8))
+        private fun ByteArrayOutputStream.putBytes(b: ByteArray) {
+            require(b.size <= 0xFFFF) { "field too long" }
             write(b.size ushr 8); write(b.size and 0xFF); write(b)
         }
-        private fun DataInputStream.getStr(): String = String(ByteArray(readUnsignedShort()).also { readFully(it) }, Charsets.UTF_8)
+        private fun DataInputStream.getStr(): String = String(getBytes(), Charsets.UTF_8)
+        private fun DataInputStream.getBytes(): ByteArray = ByteArray(readUnsignedShort()).also { readFully(it) }
 
         /** Code of the Public channel: everyone knows it, so anyone can read and post (spec/FORMAT.md). */
         const val PUBLIC_CODE = "blackout-public"

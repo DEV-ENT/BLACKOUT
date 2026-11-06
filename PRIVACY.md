@@ -26,19 +26,19 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
 DarkProof uses the internet only in these two cases, and never needs it to work:
 
 - **AI model downloads**, only when you tap Download. Models come from Hugging Face (huggingface.co), which sees your IP address like any other website. Your questions to the AI never leave the phone.
-- **Street maps (iPhone)**, when you tap Download map, or open the map while you have internet. Map data comes from OpenFreeMap (tiles.openfreemap.org), which sees your IP address and which map area is loaded, like any website. Nothing else is sent. The saved map stays on your phone.
+- **Street maps**, when you tap Download map, or open the map while you have internet. Map data comes from OpenFreeMap (tiles.openfreemap.org), which sees your IP address and which map area is loaded, like any website. Nothing else is sent. The saved map stays on your phone.
 
 ## Permissions
 
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
-- **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose.
+- **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose. On Android, photos come only from the system photo picker, with no camera or photo library permission.
 - **Add to Photos (iPhone, optional)**: only if you save a photo from the chat.
-- **Notifications (iPhone, optional)**: alerts for new group messages and check-ins, made on your phone. No push server is involved and nothing is sent to Apple or to us.
-- **Location (iPhone, optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
+- **Notifications (optional)**: alerts for new group messages and check-ins, made on your phone. No push server is involved and nothing is sent to Apple, Google or us.
+- **Location (optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.
-  - **Notifications**: to keep the mesh running in the background.
+  - **Notifications**: to keep the mesh running in the background, and for the message alerts above.
 
 DarkProof sends your location only where you choose: to your group in check-ins if you turn that on, or to everyone nearby when you share a place with your position. It never reads your location in the background.
 

@@ -25,11 +25,17 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **AI that runs on the phone.** It needs no internet once its model is downloaded.
   - **iPhone:** runs on llama.cpp. You pick the model in the app, and it keeps the conversation as context.
   - **Android:** runs Qwen 2.5 1.5B on MediaPipe.
-- **Groups and people (iPhone):**
-  - "Create a group" makes a strong random code. Friends join by pointing the iPhone Camera at the invite QR, or by an invite sent over AirDrop.
+- **Groups and people (iPhone and Android):**
+  - "Create a group" makes a strong random code. Friends join by scanning the invite QR with their phone camera, or by an invite link sent over AirDrop, Quick Share or any app. The same `darkproof://join` links work on both apps.
   - The People tab shows who is in your group, who is in range now, and when you last heard from everyone else.
   - **I'm safe** and **Need help** check-in buttons.
   - Groups you leave are kept, so you can switch back.
+- **Safety features (iPhone and Android):**
+  - Check-ins carry your battery level and, if you turn it on, your position. A compass points to a friend's last known position.
+  - **Places:** share where there is water, shelter, charging or medical help, for everyone nearby.
+  - **Small photos** (up to 14 KB) for your group, and **delivery status** ("Delivered to Anna").
+  - **Offline street maps:** save about 10 km around you while you have internet (OpenFreeMap, up to 50 MB).
+  - Alerts for new group messages, made on the phone.
 - **Public channel.** Anyone with DarkProof can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
 - **Android extras:**
   - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.
@@ -104,6 +110,8 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 - All unit tests pass.
 - Chat, relaying and encryption between two Android emulators, both over the LAN test mode and over the emulators' simulated Bluetooth LE.
 - An iPhone Simulator chatting with an Android emulator over the LAN test mode.
+- An iPhone Simulator and an Android emulator in one group, over the LAN test mode: check-ins with battery and position, places, photos and delivery status in both directions; an Android invite QR and link; messages written while offline arriving after reconnecting.
+- On an Android emulator: the offline map saved, then shown with airplane mode on; alerts while the app is in the background; picking and sending a photo.
 - Two iPhone Simulators connecting over Apple peer-to-peer.
 - A real iPhone 15 exchanging messages with a Mac over real Bluetooth LE.
 - The AI running on a real iPhone 15.
