@@ -445,13 +445,12 @@ private fun InternetCard() {
         SwitchRow("Internet", n != null, { MeshEngine.setInternet(it) },
             "While there is Wi-Fi or mobile data, messages also travel through free public relays (Nostr), so friends far away get them and this phone passes on its neighbours' messages. In a blackout the other ways keep working. Group messages stay encrypted; relays see your internet address unless you use Tor.")
         if (n != null) {
-            if (n.throughTor == false) Txt("Waiting for Tor: open Orbot and turn it on", 15, FontWeight.SemiBold, Theme.text)
+            if (n.throughTor == false) Txt("Starting Tor… the first time can take a minute", 15, FontWeight.SemiBold, Theme.text)
             else Txt(if (n.connected > 0) "Connected to ${n.connected} of ${n.total} relays" + (if (n.throughTor == true) " through Tor" else "")
                      else "No internet right now: the other ways keep working",
                 15, FontWeight.SemiBold, if (n.connected > 0) Theme.safe else Theme.dim)
             SwitchRow("Connect through Tor", Tor.enabled(ctx), { MeshEngine.setTor(it) },
-                "Relays then can't see your internet address. Needs the free Orbot app, turned on. Slower, and some relays refuse Tor. Nothing goes to the relays until DarkProof has checked that Tor is working.")
-            if (Tor.enabled(ctx)) GhostButton("Open Orbot") { Tor.openOrbot(ctx) }
+                "Relays then can't see your internet address. Tor runs inside DarkProof: nothing else to install. Slower and uses more battery. Nothing goes to the relays until DarkProof has checked that Tor is working.")
         }
     }
 }

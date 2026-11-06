@@ -25,7 +25,8 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     private let key = NostrKey() // a new throwaway key every start: relays can't link sessions
     private let mailboxes: () -> [UInt16]
     private let onStatus: (String?) -> Void
-    private var session: URLSession!
+    private var session: URLSession!       // direct
+    private var torSession: URLSession?    // through the app's own Tor (InAppTor), once it has a circuit
     private var tasks: [String: URLSessionWebSocketTask] = [:]   // url -> socket
     private var open = Set<String>()
     private var backoff: [String: Double] = [:]
@@ -44,8 +45,7 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     private var sub = "dp" + String(UInt64(Date().timeIntervalSince1970 * 1000), radix: 36)
     private var timers: [DispatchSourceTimer] = []
     private var viaTor: Bool
-    private var torOK: Bool?            // with Tor: whether the last check said traffic leaves through Tor; nil without
-    private var torCheckedAt = Date.distantPast
+    private var torOK: Bool?            // with Tor: whether the check said traffic leaves through Tor; nil without
     private var torChecking = false
 
     init(router: MeshRouter, viaTor: Bool, mailboxes: @escaping () -> [UInt16], onStatus: @escaping (String?) -> Void) {
@@ -72,7 +72,7 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
         q.async {
             let was = self.running
             self.stopNow()
-            self.viaTor = on; self.torOK = on ? false : nil; self.torCheckedAt = .distantPast
+            self.viaTor = on; self.torOK = on ? false : nil
             if was { self.startNow() } else { self.report() }
         }
     }
@@ -125,21 +125,31 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Tor
 
-    /// Asks the Tor Project whether traffic leaves through Tor; links to the relays if so, else asks again soon.
+    /// Waits for the app's own Tor, then asks the Tor Project through it whether traffic leaves through Tor; links to
+    /// the relays if so, else tries again soon.
     private func checkTor() {
         guard running, !torChecking else { return }
+        guard let conf = InAppTor.shared.sessionConfiguration() else { // Tor is still starting
+            q.asyncAfter(deadline: .now() + 2) { [weak self] in self?.checkTor() }
+            return
+        }
+        if torSession == nil {
+            conf.waitsForConnectivity = false
+            torSession = URLSession(configuration: conf, delegate: self, delegateQueue: nil)
+        }
+        guard let s = torSession else { return }
         torChecking = true
-        var r = URLRequest(url: TorCheck.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        var r = URLRequest(url: TorCheck.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         r.httpShouldHandleCookies = false
-        URLSession(configuration: .ephemeral).dataTask(with: r) { [weak self] data, _, _ in
+        s.dataTask(with: r) { [weak self] data, _, _ in
             guard let self else { return }
             self.q.async {
                 self.torChecking = false
                 guard self.running, self.viaTor else { return }
                 let ok = data.map(TorCheck.isTor) ?? false
                 self.torOK = ok
-                if ok { self.torCheckedAt = Date(); self.relays.forEach(self.connect) }
-                else { self.q.asyncAfter(deadline: .now() + 15) { [weak self] in self?.checkTor() } }
+                if ok { self.relays.forEach(self.connect) }
+                else { self.q.asyncAfter(deadline: .now() + 5) { [weak self] in self?.checkTor() } } // Tor may still be starting
                 self.report()
             }
         }.resume()
@@ -149,10 +159,9 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
 
     private func connect(_ url: String) {
         guard running, let u = URL(string: url), tasks[url] == nil else { return }
-        // With Tor (Orbot's VPN), only connect after a recent check that traffic leaves through Tor: if the VPN went
-        // off, links would otherwise go out directly.
-        if viaTor && (torOK != true || Date().timeIntervalSince(torCheckedAt) > 60) { checkTor(); return }
-        let t = session.webSocketTask(with: u)
+        if viaTor && torOK != true { checkTor(); return } // with Tor: only after the check, and only through it
+        guard let s = viaTor ? torSession : session else { return }
+        let t = s.webSocketTask(with: u)
         t.maximumMessageSize = 1 << 20
         tasks[url] = t
         t.resume()
@@ -208,7 +217,7 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
         guard tasks[url] === t else { return }
         tasks[url] = nil; open.remove(url)
         if open.isEmpty && up { up = false; router.peerDown(Self.peer) }
-        if open.isEmpty && torOK == true { torOK = false } // Orbot's VPN may be off: check again before linking
+        if open.isEmpty && torOK == true { torOK = false } // Tor may have lost its circuits: check again before linking
         report()
         guard running else { return }
         let wait = min((backoff[url] ?? 2.5) * 2, 120) // no internet: try again, less and less often

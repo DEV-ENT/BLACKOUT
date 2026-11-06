@@ -23,6 +23,11 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3") // invite QR codes, offline
     implementation("org.maplibre.gl:android-sdk:12.3.1") // offline street maps (OpenFreeMap)
     implementation("com.squareup.okhttp3:okhttp:4.12.0") // MapLibre's HTTP client: User-Agent and 4-connection limit
+    implementation("info.guardianproject:tor-android:0.4.9.14") // Tor inside the app, for "Connect through Tor" (BSD)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // Android's org.json is only a stub in unit tests
 }
+
+// tor-android declares it must be compiled against API 37.1, which this AGP can't name yet. It runs on API 24+, and
+// nothing here uses API 37, so that compile-time check is skipped. Remove this when compileSdk can be 37.1.
+tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }.configureEach { enabled = false }

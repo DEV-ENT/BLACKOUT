@@ -186,15 +186,18 @@ of any packet, so a phone can bridge packets it cannot open. Packets from older 
 ### Tor
 
 "Connect through Tor" (off by default) hides the phone's internet address from the relays. Phones are Tor clients
-only, never relays. Both apps use the free Orbot app:
+only, never relays.
 
-- **Android:** every relay link and the check below go through Orbot's SOCKS proxy, `127.0.0.1:9050`. Host names are
-  resolved by Tor. If Orbot is off the links fail, so nothing goes out directly.
-- **iPhone:** Orbot runs Tor as a VPN for the whole phone. DarkProof opens `https://orbot.app/rc/start` to start it.
-- **Check:** before linking to any relay, the app fetches `https://check.torproject.org/api/ip` and goes on only if
-  the answer has `"IsTor": true`. Otherwise it asks again every 15 s. The iPhone asks again whenever all relays are
-  lost and before any new link more than 60 s after the last check, because a VPN can be turned off at any time.
-  With Tor off, that check may show the phone's address to the Tor Project.
+- **Android:** Tor runs inside the app (tor-android 0.4.9.14, the Tor that Orbot uses) while the switch is on. Every
+  relay link and the check below go through its SOCKS port; host names are resolved by Tor. Until it has a circuit,
+  nothing goes to the relays.
+- **iPhone:** Tor runs inside the app (iCepa's Tor.framework 409.15.3) from the first time it is needed until the app
+  quits (Tor can start only once per launch). Relay links and the check use a URL session whose only route is Tor's
+  SOCKS port on `localhost`, a free port picked at start.
+- **Check:** before linking to any relay, the app fetches `https://check.torproject.org/api/ip` through Tor and goes
+  on only if the answer has `"IsTor": true`; otherwise it asks again (every 15 s on Android, 5 s on the iPhone, while
+  Tor starts). It asks again whenever all relays are lost.
+- Tested 2026-11-06: no connection from either app to a relay or to the check went around Tor.
 - **Relays through Tor:** `wss://relay.damus.io`, `wss://relay.primal.net`, `wss://nostr.oxtr.dev`,
   `wss://relay.ditto.pub`, `wss://relay.nostr.net`, `wss://nostr.data.haus`. nos.lol and nostr.mom don't answer Tor
   exits (tested 2026-11-06); the four relays in both lists carry messages between phones with and without Tor.

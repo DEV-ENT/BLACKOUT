@@ -1,5 +1,5 @@
 {
-  "originHash" : "5bdc1dc5a59408e3988a0c266ff5974a78db201140175a246b3d9e8b84c27b3d",
+  "originHash" : "9b1ca30d47bc64f60fcca48dffef98023032afd10e57b3747f772f0b4c403bcd",
   "pins" : [
     {
       "identity" : "maplibre-gl-native-distribution",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "13e41ab3d77ff5113e7e5d4ee87803b1f81f5683",
         "version" : "6.31.0"
+      }
+    },
+    {
+      "identity" : "tor.framework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/iCepa/Tor.framework",
+      "state" : {
+        "revision" : "c9c4dc20898ea9329a8ba4067aa2ea7c05de3860",
+        "version" : "409.15.3"
       }
     }
   ],

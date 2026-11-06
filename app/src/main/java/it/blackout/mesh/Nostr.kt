@@ -117,7 +117,7 @@ class NostrLink(
     private val router: () -> MeshRouter?,
     private val mailboxes: () -> Set<Int>,
     private val changed: () -> Unit,
-    private val proxy: java.net.Proxy? = null, // Tor's SOCKS proxy, when "Connect through Tor" is on
+    private val viaTor: Boolean = false, // "Connect through Tor": links go only through the app's own Tor
 ) {
     companion object {
         const val PEER = "nostr"
@@ -136,10 +136,10 @@ class NostrLink(
     }
 
     private val secret = Schnorr.newSecret() // a new throwaway key every start: relays can't link sessions
-    private val relays = if (proxy == null) RELAYS else TOR_RELAYS
+    private val relays = if (viaTor) TOR_RELAYS else RELAYS
     private val h = android.os.Handler(android.os.Looper.getMainLooper())
-    private val client = okhttp3.OkHttpClient.Builder().pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
-        .apply { proxy?.let(::proxy) }.build()
+    private val direct = okhttp3.OkHttpClient.Builder().pingInterval(30, java.util.concurrent.TimeUnit.SECONDS).build()
+    private var client = direct // through Tor's proxy once Tor is up (viaTor)
     private val open = java.util.concurrent.ConcurrentHashMap<String, okhttp3.WebSocket>()
     private val sockets = java.util.concurrent.ConcurrentHashMap<String, okhttp3.WebSocket>()
     private val backoff = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -161,8 +161,8 @@ class NostrLink(
     private var checking = false
     private var torCheck = false // a Tor check is running
 
-    /** With Tor (a [proxy]): true once a check says traffic leaves through Tor, false while waiting. Null without. */
-    @Volatile var throughTor: Boolean? = if (proxy == null) null else false; private set
+    /** With Tor: true once a check says traffic leaves through Tor, false while Tor starts. Null without Tor. */
+    @Volatile var throughTor: Boolean? = if (viaTor) false else null; private set
 
     val connected get() = open.size
     /** True while at least one relay is linked (it then counts as one peer for the router, not as a phone). */
@@ -172,7 +172,7 @@ class NostrLink(
     fun start() {
         if (running) return
         running = true
-        if (proxy == null) relays.forEach(::connect) else h.post(::waitForTor) // Tor checks run on the main thread
+        if (!viaTor) relays.forEach(::connect) else h.post(::waitForTor) // Tor checks run on the main thread
         h.postDelayed(::pump, TICK_MS)
         h.postDelayed(::check, CHECK_MS)
     }
@@ -209,12 +209,19 @@ class NostrLink(
         }
     }
 
-    /** Checks through the proxy that traffic leaves through Tor, then links to the relays; else tries again soon. */
+    /**
+     * Starts the app's Tor if needed, waits for it, checks through it that traffic leaves through Tor, then links to
+     * the relays; else tries again soon.
+     */
     private fun waitForTor() {
         if (!running || torCheck) return
+        Tor.start(ctx)
+        val p = Tor.proxy() ?: run { h.postDelayed(::waitForTor, 2_000); return } // still starting
+        client = direct.newBuilder().proxy(p).build()
         torCheck = true
+        val c = client
         Thread {
-            val ok = Tor.check(client)
+            val ok = Tor.check(c)
             h.post {
                 torCheck = false
                 if (!running) return@post
@@ -225,7 +232,7 @@ class NostrLink(
     }
 
     private fun connect(url: String) {
-        if (!running || (proxy != null && throughTor != true)) return // with Tor: only after the check
+        if (!running || (viaTor && throughTor != true)) return // with Tor: only after the check
         val ws = client.newWebSocket(okhttp3.Request.Builder().url(url).build(), object : okhttp3.WebSocketListener() {
             override fun onOpen(ws: okhttp3.WebSocket, r: okhttp3.Response) {
                 open[url] = ws; backoff.remove(url)
@@ -255,7 +262,7 @@ class NostrLink(
         if (sockets[url] !== ws) return
         sockets.remove(url); open.remove(url)
         if (open.isEmpty() && up) { up = false; router()?.peerDown(PEER) }
-        if (open.isEmpty() && throughTor == true) { throughTor = false; h.post(::waitForTor) } // Orbot stopped? check again
+        if (open.isEmpty() && throughTor == true) { throughTor = false; h.post(::waitForTor) } // Tor lost its circuits? check again
         changed()
         if (!running) return
         val wait = ((backoff[url] ?: 2_500L) * 2).coerceAtMost(120_000L) // no internet: try again, less and less often

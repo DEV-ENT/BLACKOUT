@@ -114,13 +114,6 @@ final class Engine: ObservableObject {
         nostr.setTor(on)
     }
 
-    /// Opens Orbot (it then starts its Tor VPN), or its download page if it isn't installed.
-    func openOrbot() {
-        UIApplication.shared.open(URL(string: "https://orbot.app/rc/start")!, options: [.universalLinksOnly: true]) { opened in
-            if !opened { UIApplication.shared.open(URL(string: "https://orbot.app/download/")!) }
-        }
-    }
-
     /// This phone's relay mailboxes: its group's and the Public channel's (spec/FORMAT.md, "Mailboxes").
     private func mailboxes() -> [UInt16] { [crypto.mailbox, publicCrypto.mailbox] }
 

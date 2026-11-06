@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		B1AC00000000000000000001 /* BlackoutCore in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000020 /* BlackoutCore */; };
 		B1AC00000000000000000040 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000041 /* MapLibre */; };
+		B1AC00000000000000000050 /* CTor in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000051 /* CTor */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
 			files = (
 				B1AC00000000000000000001 /* BlackoutCore in Frameworks */,
 				B1AC00000000000000000040 /* MapLibre in Frameworks */,
+				B1AC00000000000000000050 /* CTor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +80,7 @@
 			packageProductDependencies = (
 				B1AC00000000000000000020 /* BlackoutCore */,
 				B1AC00000000000000000041 /* MapLibre */,
+				B1AC00000000000000000051 /* CTor */,
 			);
 			productName = Blackout;
 			productReference = B1AC00000000000000000002 /* Blackout.app */;
@@ -105,6 +108,7 @@
 			packageReferences = (
 				B1AC00000000000000000021 /* XCLocalSwiftPackageReference "BlackoutCore" */,
 				B1AC00000000000000000042 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
+				B1AC00000000000000000052 /* XCRemoteSwiftPackageReference "Tor.framework" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B1AC00000000000000000006 /* Products */;
@@ -379,6 +383,14 @@
 				version = 6.31.0;
 			};
 		};
+		B1AC00000000000000000052 /* XCRemoteSwiftPackageReference "Tor.framework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/iCepa/Tor.framework";
+			requirement = {
+				kind = exactVersion;
+				version = 409.15.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -390,6 +402,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B1AC00000000000000000042 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;
+		};
+		B1AC00000000000000000051 /* CTor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B1AC00000000000000000052 /* XCRemoteSwiftPackageReference "Tor.framework" */;
+			productName = CTor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

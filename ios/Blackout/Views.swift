@@ -983,7 +983,7 @@ struct ConnectionsView: View {
             if internetOn {
                 let n = engine.relaysLinked
                 if engine.throughTor == false {
-                    Text("Waiting for Tor: open Orbot and turn it on")
+                    Text("Starting Tor… the first time can take a minute")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
                 } else {
                     Text(n > 0 ? "Connected to \(n) of \(engine.nostr.total) relays" + (engine.throughTor == true ? " through Tor" : "")
@@ -994,9 +994,8 @@ struct ConnectionsView: View {
                     Text("Connect through Tor").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
                 }
                 .tint(Theme.safe)
-                Text("Relays then can't see your internet address. Needs the free Orbot app with its VPN on. Slower, and some relays refuse Tor. Nothing goes to the relays until DarkProof has checked that Tor is working.")
+                Text("Relays then can't see your internet address. Tor runs inside DarkProof: nothing else to install. Slower and uses more battery. Nothing goes to the relays until DarkProof has checked that Tor is working.")
                     .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
-                if torOn { Button("Open Orbot") { engine.openOrbot() }.buttonStyle(GhostButton()) }
             }
         }
     }

@@ -83,11 +83,13 @@ object MeshEngine {
         val c = app ?: return
         c.getSharedPreferences("mesh", 0).edit().putBoolean("internet", on).apply()
         nostr?.stop(); nostr = null
-        if (on) nostr = NostrLink(c, { router }, ::mailboxes, ::notifyUi, Tor.proxy(c)).also { it.start() }
+        val tor = Tor.enabled(c)
+        if (on) nostr = NostrLink(c, { router }, ::mailboxes, ::notifyUi, tor).also { it.start() }
+        if (!on || !tor) main.post { Tor.stop(c) } // Tor runs only while the relays need it
         notifyUi()
     }
 
-    /** Turns "Connect through Tor" on or off (Connections screen): the relays link again, through Orbot or not. */
+    /** Turns "Connect through Tor" on or off (Connections screen): the relays link again, through the app's own Tor or not. */
     @Synchronized fun setTor(on: Boolean) {
         val c = app ?: return
         Tor.setEnabled(c, on)
