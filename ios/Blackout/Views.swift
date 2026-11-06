@@ -6,7 +6,8 @@ struct RootView: View {
     @AppStorage("name") private var name = ""
     @AppStorage("code") private var code = ""
     @AppStorage("groupName") private var groupName = "My group"
-    @State private var engine: Engine?
+    @ObservedObject private var mesh = Mesh.shared
+    private var engine: Engine? { mesh.engine }
     @State private var invite: PendingInvite?   // from an invite link
     @State private var confirmSwitch = false
     @State private var showInvite = false       // opens the invite sheet, e.g. right after creating a group
@@ -19,11 +20,11 @@ struct RootView: View {
                 SetupView(invite: invite) { n, g, c, created in
                     SavedGroups.remember(.init(name: g, code: c))
                     name = n; groupName = g; code = c
-                    engine = Engine(name: n, code: c)
+                    mesh.start(name: n, code: c)
                     invite = nil; showInvite = created
                 }
             } else {
-                Theme.bg.ignoresSafeArea().onAppear { engine = Engine(name: name, code: code) }
+                Theme.bg.ignoresSafeArea().onAppear { mesh.startIfSetUp() }
             }
         }
         .tint(Theme.text)

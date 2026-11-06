@@ -53,11 +53,46 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
 
     func start() {
         q.async {
+            #if os(iOS)
+            // Restore identifiers: if iOS closes DarkProof to free memory, it relaunches it in the background when
+            // Bluetooth activity arrives (a phone connecting, a message coming in), so this phone keeps relaying.
+            // This doesn't apply if the user swipes the app away, or after the phone restarts until it is opened.
+            self.cm = CBCentralManager(delegate: self, queue: self.q,
+                                       options: [CBCentralManagerOptionRestoreIdentifierKey: "darkproof.mesh.central"])
+            self.pm = CBPeripheralManager(delegate: self, queue: self.q,
+                                          options: [CBPeripheralManagerOptionRestoreIdentifierKey: "darkproof.mesh.peripheral"])
+            #else
             self.cm = CBCentralManager(delegate: self, queue: self.q)
             self.pm = CBPeripheralManager(delegate: self, queue: self.q)
+            #endif
             self.report()
         }
     }
+
+    #if os(iOS)
+    /// Relaunched by iOS: pick up the phones we were connected to. Their links start over (services, HELLO), as
+    /// after any new connection, once Bluetooth reports power-on. Called before the state update, on `q`.
+    func centralManager(_ c: CBCentralManager, willRestoreState state: [String: Any]) {
+        let restored = state[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] ?? []
+        Self.restoredHook?("central restored \(restored.count) peripheral(s)")
+        for p in restored where links.count < Self.maxLinks && !links.values.contains(where: { $0.isCentral && $0.key == p.identifier }) {
+            let l = Link(id: newLinkId(), isCentral: true, key: p.identifier)
+            l.peripheral = p
+            links[l.id] = l
+            p.delegate = self // connecting resumes on power-on (centralManagerDidUpdateState): no calls before that
+        }
+    }
+
+    /// Relaunched by iOS: our GATT service is published again on power-on, as at every start. Centrals that were
+    /// subscribed get refused writes for their old link and reconnect, which starts a fresh link.
+    func peripheralManager(_ m: CBPeripheralManager, willRestoreState state: [String: Any]) {
+        let services = state[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService] ?? []
+        Self.restoredHook?("peripheral restored \(services.count) service(s)")
+    }
+
+    /// Debug logging of restorations (Engine sets it in debug builds).
+    static var restoredHook: ((String) -> Void)?
+    #endif
 
     /// Called by the router, possibly while it holds its lock, so only queue the work.
     func send(_ peer: String, _ p: Packet) {
@@ -71,6 +106,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
         switch c.state {
         case .poweredOn:
             c.scanForPeripherals(withServices: [service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+            for l in links.values where l.isCentral && !l.open { // restored before power-on: finish connecting
+                if let p = l.peripheral { if p.state == .connected { p.discoverServices([service]) } else { c.connect(p) } }
+            }
             setNote("")
         case .poweredOff: dropAll(central: true); setNote("Bluetooth is off")
         case .unauthorized: setNote("not allowed (Settings > DarkProof > Bluetooth)")

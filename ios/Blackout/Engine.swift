@@ -1,6 +1,25 @@
 import Foundation
 import BlackoutCore
 
+/// Owns the one Engine. It starts as soon as the app process starts, if a group is set up, so it also runs when iOS
+/// relaunches DarkProof in the background for Bluetooth (BleLink's restore identifiers), with no screen at all.
+final class Mesh: ObservableObject {
+    static let shared = Mesh()
+    @Published private(set) var engine: Engine?
+
+    /// Starts the mesh for the saved group, if there is one. Safe to call more than once.
+    func startIfSetUp() {
+        let d = UserDefaults.standard
+        guard engine == nil, let code = d.string(forKey: "code"), !code.isEmpty else { return }
+        engine = Engine(name: d.string(forKey: "name") ?? "", code: code)
+    }
+
+    /// Starts the mesh right after setup.
+    func start(name: String, code: String) {
+        if engine == nil { engine = Engine(name: name, code: code) }
+    }
+}
+
 /// State shared between the transports and the UI, like the Android MeshEngine.
 final class Engine: ObservableObject {
     static let maxTtl = 16
@@ -58,6 +77,7 @@ final class Engine: ObservableObject {
         #endif
         #if DEBUG
         DebugLog.start()
+        BleLink.restoredHook = { DebugLog.write("bluetooth " + $0) }
         #endif
         mc.start()
         ble.start()
@@ -207,7 +227,7 @@ enum DebugLog {
         .appendingPathComponent("debug.log")
 
     static func start() {
-        write("app started")
+        DispatchQueue.main.async { write(UIApplication.shared.applicationState == .background ? "app started in background" : "app started") }
         let nc = NotificationCenter.default
         nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { _ in write("app in background") }
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { _ in write("app in foreground") }
