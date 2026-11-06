@@ -49,7 +49,7 @@ struct PlacesView: View {
             let shown = Self.sorted(engine.places.filter { filter == nil || $0.place.kind == filter }, from: me)
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
-                    ScreenTitle(title: "Places", subtitle: "Shared by everyone nearby, from any group")
+                    ScreenTitle(title: "Places", subtitle: "Shared by anyone with DarkProof, nearby or online")
                     PillSwitch(left: "List", right: "Map", isRight: $showMap)
                 }
                 .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
@@ -253,10 +253,10 @@ struct AddPlaceSheet: View {
                         .font(.footnote).foregroundStyle(Theme.help)
                 }
             }
-            Button(posting ? "Getting your position…" : "Share with everyone nearby") { post() }
+            Button(posting ? "Getting your position…" : "Share with everyone") { post() }
                 .buttonStyle(PrimaryButton())
                 .disabled(posting || (note.trimmingCharacters(in: .whitespaces).isEmpty && !withPosition))
-            Text("Everyone nearby can see it, from any group. It stays on phones for up to 7 days.")
+            Text("Anyone with DarkProof can see it, nearby or online. It stays on phones and relays for up to 7 days.")
                 .font(.footnote).foregroundStyle(Theme.dim)
         }
         .onAppear { loc.requestPermission() }

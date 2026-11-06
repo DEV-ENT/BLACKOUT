@@ -14,7 +14,7 @@ private class Db(c: Context) : SQLiteOpenHelper(c, "mesh.db", null, 1) {
     override fun onUpgrade(d: SQLiteDatabase, a: Int, b: Int) {}
 }
 
-/** Where one of my messages is: still on this phone, given to a phone in range, or confirmed by group members. */
+/** Where one of my messages is: still on this phone, given to a phone in range or the relays, or confirmed. */
 sealed class Delivery {
     object Waiting : Delivery()
     object Sent : Delivery()
@@ -84,7 +84,7 @@ object MeshEngine {
         c.getSharedPreferences("mesh", 0).edit().putBoolean("internet", on).apply()
         nostr?.stop(); nostr = null
         val tor = Tor.enabled(c)
-        if (on) nostr = NostrLink(c, { router }, ::mailboxes, ::notifyUi, tor).also { it.start() }
+        if (on) nostr = NostrLink(c, { router }, ::mailboxes, ::notifyUi, tor, ::markHandedOff).also { it.start() }
         if (!on || !tor) main.post { Tor.stop(c) } // Tor runs only while the relays need it
         notifyUi()
     }
@@ -185,8 +185,11 @@ object MeshEngine {
             else -> (sender ?: return)(peer, p)
         }
         if (lora && !(if (peer == LoraLink.PEER) Meshtastic.fits(p) else MeshCore.fits(p))) return // too long for the radio: not really sent
-        if (synchronized(ids) { p.id in mine && handedOff.add(p.id) }) notifyUi()
+        markHandedOff(p.id)
     }
+
+    /** One of my messages left this phone: to a phone, a radio or the internet relays ("Sent"). */
+    private fun markHandedOff(id: String) { if (synchronized(ids) { id in mine && handedOff.add(id) }) notifyUi() }
 
     /** A packet seen for the first time: keep it, and show it if it belongs to this group or the Public channel. */
     private fun onDeliver(p: Packet) {

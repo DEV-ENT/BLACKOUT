@@ -118,6 +118,7 @@ class NostrLink(
     private val mailboxes: () -> Set<Int>,
     private val changed: () -> Unit,
     private val viaTor: Boolean = false, // "Connect through Tor": links go only through the app's own Tor
+    private val onRelays: (String) -> Unit = {}, // a packet went up to the relays, or they had it already
 ) {
     companion object {
         const val PEER = "nostr"
@@ -291,10 +292,13 @@ class NostrLink(
         markSent(p.id)
     }
 
-    private fun markSent(id: String) = synchronized(lock) {
-        sent += id
-        if (sent.size > 3_000) sent.remove(sent.first())
-        prefs.edit().putString("relaySent", sent.joinToString(",")).apply()
+    private fun markSent(id: String) {
+        synchronized(lock) {
+            sent += id
+            if (sent.size > 3_000) sent.remove(sent.first())
+            prefs.edit().putString("relaySent", sent.joinToString(",")).apply()
+        }
+        onRelays(id)
     }
 
     /** Asks the relays which of the newest unchecked bridged packets they have; the rest go to [missing]. */

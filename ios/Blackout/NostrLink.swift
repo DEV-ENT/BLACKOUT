@@ -48,8 +48,11 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
     private var torOK: Bool?            // with Tor: whether the check said traffic leaves through Tor; nil without
     private var torChecking = false
 
-    init(router: MeshRouter, viaTor: Bool, mailboxes: @escaping () -> [UInt16], onStatus: @escaping (String?) -> Void) {
-        self.router = router; self.viaTor = viaTor; self.mailboxes = mailboxes; self.onStatus = onStatus
+    private let onRelays: (String) -> Void // a packet went up to the relays, or they had it already
+
+    init(router: MeshRouter, viaTor: Bool, mailboxes: @escaping () -> [UInt16], onRelays: @escaping (String) -> Void,
+         onStatus: @escaping (String?) -> Void) {
+        self.router = router; self.viaTor = viaTor; self.mailboxes = mailboxes; self.onRelays = onRelays; self.onStatus = onStatus
         torOK = viaTor ? false : nil
         super.init()
         let config = URLSessionConfiguration.default
@@ -252,6 +255,7 @@ final class NostrLink: NSObject, URLSessionWebSocketDelegate {
         sentList.append(id); sent.insert(id)
         if sentList.count > 3_000 { sent.remove(sentList.removeFirst()) }
         UserDefaults.standard.set(sentList, forKey: "relaySent")
+        onRelays(id)
     }
 
     /// Asks the relays which of the newest unchecked bridged packets they have; the rest go to `missing`.

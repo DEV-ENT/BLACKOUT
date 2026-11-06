@@ -73,14 +73,14 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
         Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ScreenTitle(g.name, if (phones == 1) "1 phone in range" else "$phones phones in range")
             PillSwitch(g.name, "Everyone", everyone) { everyone = it }
-            Txt(if (everyone) "Everyone nearby can read these, from any group." else "Only people in ${g.name} can read these.", 14, color = Theme.dim)
+            Txt(if (everyone) "Anyone with DarkProof can read these, nearby or online." else "Only people in ${g.name} can read these.", 14, color = Theme.dim)
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (shown.isEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Txt("No messages yet", 20, FontWeight.Bold)
-                    Txt(if (everyone) "Messages here reach everyone nearby." else "Say hi, or tap I'm safe on Home.", 15, color = Theme.dim)
+                    Txt(if (everyone) "Messages here reach everyone, nearby or online." else "Say hi, or tap I'm safe on Home.", 15, color = Theme.dim)
                 }
             }
             itemsIndexed(shown, key = { _, m -> m.id }) { i, m ->
@@ -190,8 +190,8 @@ private fun Status(d: Delivery?, time: String?) {
             val n = d.readers.map { it.name }
             "Delivered to " + when (n.size) { 1 -> n[0]; 2 -> "${n[0]} and ${n[1]}"; else -> "${n.size} people" }
         }
-        Delivery.Sent -> "Sent to a phone nearby"
-        Delivery.Waiting -> "Waiting for a phone in range"
+        Delivery.Sent -> "Sent"
+        Delivery.Waiting -> "Waiting for a phone or internet"
         null -> null
     }
     Row(Modifier.padding(end = 12.dp, top = 3.dp).fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
@@ -257,7 +257,7 @@ fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
                 people.mapNotNull { p -> p.spot?.let { Pin(p.name, it, p.spotTs, when (p.checkIn) { CheckIn.HELP -> "#FF453B"; CheckIn.SAFE -> "#33D64A"; null -> "#949494" }) } }
         }
         Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ScreenTitle("Places", "Shared by everyone nearby, from any group")
+            ScreenTitle("Places", "Shared by anyone with DarkProof, nearby or online")
             PillSwitch("List", "Map", onMap) { onMap = it }
             StreetMap(pins, me, Modifier.fillMaxWidth().weight(1f), open)
             Txt("Map data © OpenStreetMap contributors · OpenFreeMap · OpenMapTiles", 12, color = Theme.faint)
@@ -267,7 +267,7 @@ fun PlacesTab(messages: List<Message>, open: (Sheet) -> Unit) {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ScreenTitle("Places", "Shared by everyone nearby, from any group")
+        ScreenTitle("Places", "Shared by anyone with DarkProof, nearby or online")
         PillSwitch("List", "Map", onMap) { onMap = it }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip("All", null, filter == null) { filter = null }
@@ -336,7 +336,7 @@ fun AddPlaceSheet(close: () -> Unit) {
             keyboard = KeyboardOptions(KeyboardCapitalization.Sentences))
         Card { SwitchRow("Add my current position", withSpot, { withSpot = it }, "So people can find it with the compass. Share it only if you are at the place.") }
         if (withSpot && !Locator.allowed(ctx)) Txt("Location is off for DarkProof: the place will be shared without a position.", 14, color = Theme.help)
-        Txt("Everyone nearby can see it, from any group. It stays on phones for up to 7 days.", 14, color = Theme.dim)
+        Txt("Anyone with DarkProof can see it, nearby or online. It stays on phones and relays for up to 7 days.", 14, color = Theme.dim)
         PrimaryButton(if (sending) "Finding your position…" else "Share", enabled = !sending) {
             if (!meshReady(ctx)) return@PrimaryButton
             fun go(sp: Spot?) { Thread { MeshEngine.send(Place(kind, note, sp).text, public = true) }.start(); close() }

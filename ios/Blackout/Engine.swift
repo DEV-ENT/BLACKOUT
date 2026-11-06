@@ -36,7 +36,7 @@ final class Engine: ObservableObject {
     @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
     @Published private(set) var name: String
     @Published private(set) var deliveries = Deliveries()  // who confirmed which message (spec/FORMAT.md, "Delivery receipts")
-    @Published private(set) var handedOff: Set<String> = [] // ids of my messages given to at least one phone
+    @Published private(set) var handedOff: Set<String> = [] // ids of my messages given to a phone, radio or the relays
     let deviceId: String
     let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
     private var _crypto: GroupCrypto   // the group key; read from the router's thread, so guarded by cryptoLock
@@ -80,7 +80,8 @@ final class Engine: ObservableObject {
         meshcore = MeshCoreLink(router: router) { [weak self] s in self?.setStatus("3b-meshcore", s) }
         wifi = WifiLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("4-wifi", s) }
         if d.object(forKey: "wifiNetwork") as? Bool ?? true { wifi.start() }
-        nostr = NostrLink(router: router, viaTor: d.bool(forKey: "tor"), mailboxes: { [weak self] in self?.mailboxes() ?? [] }) { [weak self] s in
+        nostr = NostrLink(router: router, viaTor: d.bool(forKey: "tor"), mailboxes: { [weak self] in self?.mailboxes() ?? [] },
+                          onRelays: { [weak self] id in self?.markHandedOff(id) }) { [weak self] s in
             self?.setStatus("5-internet", s)
         }
         if d.object(forKey: "internet") as? Bool ?? true { nostr.start() }
@@ -220,11 +221,14 @@ final class Engine: ObservableObject {
         else if peer.hasPrefix(MultipeerLink.prefix) { mc.send(peer, p) }
         else if peer.hasPrefix(WifiLink.prefix) { wifi.send(peer, p) }
         // A packet that hasn't hopped yet (one less than maxTtl after forwarding) was written on this phone.
-        else if peer == NostrLink.peer { nostr.send(p, mine: p.ttl >= Self.maxTtl - 1); return } // "handed off" = to a phone
-        if newlyMine {
-            idsLock.withLock { _ = marked.insert(p.id) }
-            DispatchQueue.main.async { self.handedOff.insert(p.id) }
-        }
+        else if peer == NostrLink.peer { nostr.send(p, mine: p.ttl >= Self.maxTtl - 1); return } // "Sent" once it is up
+        if newlyMine { markHandedOff(p.id) }
+    }
+
+    /// One of my messages left this phone: to a phone, a radio or the internet relays ("Sent"). Any thread.
+    private func markHandedOff(_ id: String) {
+        let newly = idsLock.withLock { mine.contains(id) && marked.insert(id).inserted }
+        if newly { DispatchQueue.main.async { self.handedOff.insert(id) } }
     }
 
     /// This group's message, else a Public channel message, else nil (relayed but not shown).

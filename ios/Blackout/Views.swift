@@ -400,7 +400,7 @@ struct ChatView: View {
                             subtitle: engine.phones == 0 ? "No one in range right now" :
                                 "\(engine.phones) \(engine.phones == 1 ? "phone" : "phones") in range")
                 ChannelSwitch(toPublic: $toPublic, groupName: groupName)
-                Text(toPublic ? "Anyone with DarkProof nearby can read these." : "Only people in \(groupName) can read these.")
+                Text(toPublic ? "Anyone with DarkProof can read these, nearby or online." : "Only people in \(groupName) can read these.")
                     .font(.system(size: 13)).foregroundStyle(Theme.faint)
             }
             .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
@@ -408,7 +408,7 @@ struct ChatView: View {
             if list.isEmpty {
                 EmptyState(symbol: toPublic ? "megaphone.fill" : "bubble.left.and.bubble.right.fill",
                            title: "No messages yet",
-                           text: toPublic ? "Messages for everyone nearby show up here, from any group."
+                           text: toPublic ? "Messages for everyone show up here, nearby or online, from any group."
                                           : "Write the first one. It reaches everyone in \(groupName) who is in range, or later when they are.")
             } else {
                 ScrollViewReader { proxy in
@@ -531,7 +531,7 @@ struct ChatView: View {
     }
 }
 
-/// Your group or everyone nearby.
+/// Your group or everyone.
 struct ChannelSwitch: View {
     @Binding var toPublic: Bool
     let groupName: String
@@ -640,7 +640,7 @@ extension Delivery {
 
     var label: String {
         switch self {
-        case .waiting: return "Waiting for a phone in range"
+        case .waiting: return "Waiting for a phone or internet"
         case .sent: return "Sent"
         case .delivered(let r):
             let n = r.map(\.name)
