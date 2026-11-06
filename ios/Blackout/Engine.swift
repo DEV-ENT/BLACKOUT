@@ -173,7 +173,10 @@ final class Engine: ObservableObject {
             DispatchQueue.main.async {
                 self.messages.append(m)
                 self.messages.sort { $0.ts < $1.ts }
-                if !m.isPublic && m.sender != self.deviceId { self.ack(m.id) }
+                if !m.isPublic && m.sender != self.deviceId {
+                    self.ack(m.id)
+                    Notifier.shared.received(m, groupName: UserDefaults.standard.string(forKey: "groupName") ?? "your group")
+                }
             }
         } else if let r = receiptCrypto.open(p) {
             idsLock.withLock { _ = receiptIds.insert(p.id) }

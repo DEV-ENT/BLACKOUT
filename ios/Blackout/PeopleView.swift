@@ -352,6 +352,7 @@ struct GroupSheet: View {
     @State private var saved: [SavedGroups.Entry] = []
     @AppStorage(LocationService.shareKey) private var shareLocation = false
     @ObservedObject private var loc = LocationService.shared
+    @ObservedObject private var notifier = Notifier.shared
 
     var body: some View {
         SheetPage(title: "Settings") {
@@ -366,6 +367,28 @@ struct GroupSheet: View {
                     .buttonStyle(PrimaryButton())
                     .disabled(clean(nameDraft, 20).isEmpty || clean(groupDraft, Invite.maxGroupName).isEmpty)
             }
+            Card {
+                HStack {
+                    Text("Notifications").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                    Spacer()
+                    switch notifier.status {
+                    case .authorized, .provisional, .ephemeral: Chip("On", Theme.safe)
+                    case .denied: Chip("Off")
+                    default: EmptyView()
+                    }
+                }
+                Text("Alerts when your group writes or checks in, even when DarkProof is in the background. Someone asking for help always gets an alert of their own. Made on your phone: no internet needed.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                if notifier.status == .notDetermined {
+                    Button("Turn on notifications") { notifier.requestPermission() }.buttonStyle(GhostButton())
+                } else if notifier.status == .denied {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    .buttonStyle(GhostButton())
+                }
+            }
+            .onAppear { notifier.refresh() }
             Card {
                 Toggle(isOn: $shareLocation) {
                     Text("Share my location in check-ins").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)

@@ -4,6 +4,7 @@ import SwiftUI
 struct BlackoutApp: App {
     init() {
         OfflineMap.shared.setUp()
+        Notifier.shared.setUp() // before launch ends, so tapping an alert that relaunched the app is handled
         Mesh.shared.startIfSetUp() // also when iOS relaunches the app in the background for Bluetooth
         #if DEBUG
         let args = CommandLine.arguments // devicectl ... launch --console it.darkproof.mesh aiSelfTest <model file>

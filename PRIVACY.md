@@ -34,6 +34,7 @@ DarkProof uses the internet only in these two cases, and never needs it to work:
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
 - **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose.
 - **Add to Photos (iPhone, optional)**: only if you save a photo from the chat.
+- **Notifications (iPhone, optional)**: alerts for new group messages and check-ins, made on your phone. No push server is involved and nothing is sent to Apple or to us.
 - **Location (iPhone, optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.

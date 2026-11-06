@@ -198,6 +198,8 @@ struct MainView: View {
     @AppStorage("code") private var code = ""
     @State private var tab = 0
     @State private var sheet: Sheet?
+    @ObservedObject private var notifier = Notifier.shared
+    @AppStorage("askedNotifications") private var askedNotifications = false
 
     var body: some View {
         TabView(selection: $tab) {
@@ -220,7 +222,12 @@ struct MainView: View {
             case .radio: RadioView(engine: engine)
             }
         }
-        .onAppear { if showInvite { showInvite = false; sheet = .invite } } // right after creating a group
+        .onAppear {
+            if showInvite { showInvite = false; sheet = .invite } // right after creating a group
+            if !askedNotifications { askedNotifications = true; notifier.requestPermission() } // once, after setup
+            if let t = notifier.openTab { tab = t; notifier.openTab = nil }
+        }
+        .onChange(of: notifier.openTab) { t in if let t { tab = t; notifier.openTab = nil } }
         .onChange(of: showInvite) { open in if open { showInvite = false; sheet = .invite } }
     }
 }
