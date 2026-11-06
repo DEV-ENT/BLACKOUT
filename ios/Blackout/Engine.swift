@@ -69,6 +69,7 @@ final class Engine: ObservableObject {
         let all = store.loadAll()
         router.restore(all)
         load(all)
+        compactStore(all)
         mc = MultipeerLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("1-mc", s) }
         ble = BleLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("2-ble", s) }
         lora = LoraLink(router: router) { [weak self] s in self?.setStatus("3-lora", s) }
@@ -94,6 +95,37 @@ final class Engine: ObservableObject {
         cryptoLock.withLock { _crypto = c; _receipts = r }
         self.name = name
         load(store.loadAll())
+    }
+
+    /// At most once a day, in the background: forgets packets older than 7 days that no saved group can read (phones
+    /// stop passing them on after 7 days anyway) and Public messages beyond the newest 2,000, so the store doesn't grow
+    /// without end. Same rules as the Android app (MeshEngine.load).
+    private func compactStore(_ all: [Packet]) {
+        let d = UserDefaults.standard, now = Date().timeIntervalSince1970
+        guard now - d.double(forKey: "storeCompactedAt") > 24 * 3600 else { return }
+        d.set(now, forKey: "storeCompactedAt")
+        let current = d.string(forKey: "code"), saved = SavedGroups.all().filter { $0.code != current }.map(\.code)
+        let group = crypto, receipts = receiptCrypto, pub = publicCrypto, store = store
+        DispatchQueue.global(qos: .utility).async {
+            let cut = Int64(now * 1000) - 7 * 24 * 3_600_000
+            var others: [(GroupCrypto, GroupCrypto)]? = nil // derived only if needed: each key takes 120,000 rounds
+            var drop = Set<String>(), publicMsgs: [(id: String, ts: Int64)] = []
+            for p in all {
+                if group.open(p) != nil || receipts.open(p) != nil { continue }
+                if pub.open(p) != nil { publicMsgs.append((p.id, p.ts)); continue }
+                guard p.ts < cut else { continue }
+                if others == nil { others = saved.map { let g = GroupCrypto(code: $0); return (g, g.receipts()) } }
+                if !others!.contains(where: { $0.0.open(p) != nil || $0.1.open(p) != nil }) { drop.insert(p.id) }
+            }
+            if publicMsgs.count > 2000 {
+                publicMsgs.sort { $0.ts < $1.ts }
+                publicMsgs.prefix(publicMsgs.count - 2000).forEach { drop.insert($0.id) }
+            }
+            store.remove(drop)
+            #if DEBUG
+            if !drop.isEmpty { DebugLog.write("store: removed \(drop.count) old packets") }
+            #endif
+        }
     }
 
     /// Messages, receipts and the ids of my own messages, from stored packets. Main thread.
@@ -160,7 +192,7 @@ final class Engine: ObservableObject {
     private func read(_ p: Packet) -> Message? {
         if let m = crypto.open(p) { return m }
         guard let m = publicCrypto.open(p) else { return nil }
-        return Message(id: m.id, ts: m.ts, sender: m.sender, name: m.name, text: m.text, isPublic: true, photo: m.photo)
+        return Message(id: m.id, ts: m.ts, sender: m.sender, name: m.name, text: m.text, isPublic: true) // photos are group-only (spec)
     }
 
     /// A packet seen for the first time: keep it, and show it if it belongs to this group or the Public channel.

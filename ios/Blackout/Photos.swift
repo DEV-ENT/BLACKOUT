@@ -1,10 +1,25 @@
 import SwiftUI
 import PhotosUI
+import ImageIO
 import BlackoutCore
 
 /// Makes a photo small enough for one packet (`Photo.maxBytes`): JPEG, a few hundred pixels wide.
 /// Bluetooth carries a few kilobytes per second, so this keeps a photo to a few seconds per hop.
 enum PhotoShrinker {
+    /// A photo from another phone, decoded safely: its bytes are untrusted, so a header claiming a huge picture is
+    /// refused (it could use hundreds of MB) and the picture is decoded at most `maxPixels` on its longest side.
+    static func received(_ data: Data, maxPixels: Int = 1280) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int,
+              w > 0, h > 0, w <= 4096, h <= 4096 else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+                                        kCGImageSourceCreateThumbnailWithTransform: true]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
     static func jpeg(_ image: UIImage) -> Data? {
         var side: CGFloat = 640
         while side >= 120 {
@@ -67,7 +82,7 @@ struct PhotoViewer: View {
 
     var body: some View {
         SheetPage(title: from) {
-            if let ui = UIImage(data: jpeg) {
+            if let ui = PhotoShrinker.received(jpeg) {
                 Image(uiImage: ui).resizable().scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .frame(maxWidth: .infinity)

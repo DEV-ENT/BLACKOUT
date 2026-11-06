@@ -12,7 +12,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
 - **Mesh forwarding.** Every phone stores messages and passes them on to the phones it meets:
   - Duplicates are dropped.
   - Each message can be relayed up to 16 times.
-  - Each phone passes on up to 500 messages, for 7 days. Messages stay readable on the phone until the app is deleted.
+  - Each phone passes on up to 500 messages, for 7 days. Your group's messages stay readable on the phone until the app is deleted; the phone keeps the newest 2,000 Public messages, and forgets other groups' messages it can't read after 7 days.
 - **Ways phones connect:**
 
   | Connection | Android | iPhone |

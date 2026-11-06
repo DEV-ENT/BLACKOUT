@@ -206,6 +206,17 @@ object LanTest {
         log("debug intent: lan=${i.getStringExtra("lan")} samples=${i.getStringExtra("samples")} started=${MeshEngine.router != null}")
         if (i.getStringExtra("lan") == "listen") whenStarted { log("lan: listening on $PORT"); lan.listen(PORT) }
         if (i.getStringExtra("aiSelfTest") != null) whenStarted { aiSelfTest(c) }
+        if (i.getStringExtra("dumpPhotos") != null) whenStarted { // writes every photo in the chat to the app's files folder
+            MeshEngine.snapshot().filter { it.photo != null }.forEach { m -> java.io.File(c.getExternalFilesDir(null), "photo-${m.id}.jpg").writeBytes(m.photo!!) }
+            log("dumped photos")
+        }
+        if (i.getStringExtra("badPhoto") != null) whenStarted {
+            // A JPEG header claiming 8000x8000 pixels (about 256 MB decoded), then nothing: phones must not try to decode it.
+            val b = intArrayOf(0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x1F, 0x40, 0x1F, 0x40, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xD9).map { it.toByte() }.toByteArray()
+            MeshEngine.send(Photo.text("Crafted 8000x8000 header"), photo = b)
+            MeshEngine.send("Public photo test", public = true, photo = b)
+            log("interop: sent crafted photo")
+        }
         if (i.getStringExtra("samples") != null) whenStarted {
             val spot = Spot(45.46600, 9.19200, 8)
             MeshEngine.send(CheckIn.SAFE.text(81, spot))

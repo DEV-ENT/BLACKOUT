@@ -142,7 +142,8 @@ data class Reader(val id: String, val name: String, val ts: Long)
 /** Who got which message, built from opened receipts. */
 class Deliveries {
     private val byMessage = HashMap<String, MutableList<Reader>>()
-    fun readers(messageId: String): List<Reader> = byMessage[messageId].orEmpty()
+    /** A copy: receipts keep arriving on other threads while the screen reads it. */
+    fun readers(messageId: String): List<Reader> = byMessage[messageId]?.toList().orEmpty()
     fun add(r: Message) {
         for (id in Receipt.ids(r.text)) {
             val list = byMessage.getOrPut(id) { mutableListOf() }
@@ -175,6 +176,29 @@ data class Person(
             }
             return by.values.sortedWith(compareByDescending<Person> { if (it.checkIn == CheckIn.HELP) 1 else 0 }.thenByDescending { it.lastTs })
         }
+    }
+}
+
+/**
+ * What the on-device AI sees, sized for its 4,096-token window (about 4 characters per token): the group summary, then
+ * the newest turns that fit, starting with a question. That leaves room for the instructions, the question and a
+ * 1,024-token answer.
+ */
+object AiContext {
+    const val MAX_HISTORY_CHARS = 4_000
+    const val MAX_SITUATION_CHARS = 4_000
+    const val MAX_TURNS = 12
+
+    fun <T> fit(turns: List<T>, text: (T) -> String, isQuestion: (T) -> Boolean,
+                maxChars: Int = MAX_HISTORY_CHARS, maxTurns: Int = MAX_TURNS): List<T> {
+        val out = ArrayDeque<T>(); var total = 0
+        for (t in turns.asReversed()) {
+            val n = text(t).length
+            if (out.size >= maxTurns || total + n > maxChars) break
+            out.addFirst(t); total += n
+        }
+        while (out.isNotEmpty() && !isQuestion(out.first())) out.removeFirst()
+        return out.toList()
     }
 }
 

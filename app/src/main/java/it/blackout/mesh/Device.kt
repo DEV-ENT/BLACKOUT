@@ -80,6 +80,15 @@ object Locator {
         h.postDelayed({ finish(null) }, waitMs)
     }
 
+    /** The phone's last position if it is at most 10 minutes old, without turning on GPS. */
+    @SuppressLint("MissingPermission")
+    fun lastKnown(c: Context): Spot? {
+        if (!allowed(c)) return null
+        val lm = c.getSystemService(LocationManager::class.java)
+        return lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .filter { ageMs(it) < 600_000 }.minByOrNull { it.accuracy }?.let(::spot)
+    }
+
     /** Position updates every few seconds until the returned function is called. */
     @SuppressLint("MissingPermission")
     fun watch(c: Context, update: (Spot) -> Unit): () -> Unit {
@@ -158,6 +167,18 @@ object PhotoShrinker {
             var sample = 1; while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1280) sample *= 2
             c.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
         }
+}
+
+/**
+ * A photo from another phone, decoded safely: its bytes are untrusted, so a header claiming a huge picture is refused
+ * (it could need hundreds of MB) and the picture is decoded at most about [maxSide] pixels on its longest side.
+ */
+fun decodePhoto(jpeg: ByteArray, maxSide: Int = 1280): Bitmap? {
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, o)
+    if (o.outWidth !in 1..4096 || o.outHeight !in 1..4096) return null
+    var sample = 1; while (maxOf(o.outWidth, o.outHeight) / sample > maxSide) sample *= 2
+    return runCatching { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options().apply { inSampleSize = sample }) }.getOrNull()
 }
 
 /** A QR code as a black-on-white bitmap, made on the phone. */

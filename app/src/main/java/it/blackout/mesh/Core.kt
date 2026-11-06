@@ -117,7 +117,10 @@ class MeshRouter(
     private val seen = HashSet<String>()
     private val stored = LinkedHashMap<String, Packet>()
     @Synchronized fun peerCount() = peers.size
-    @Synchronized fun restore(all: List<Packet>) = all.sortedBy { it.ts }.forEach { seen += it.id; keep(it) }
+    /** After a restart: [all] is passed on again; [seenIds] are packets already handled, so they aren't shown twice. */
+    @Synchronized fun restore(all: List<Packet>, seenIds: Collection<String> = emptyList()) {
+        seen += seenIds; all.sortedBy { it.ts }.forEach { seen += it.id; keep(it) }
+    }
     @Synchronized fun publish(p: Packet) { seen += p.id; keep(p); peers.forEach { forward(it, p) } }
     @Synchronized fun peerDown(peer: String) { peers -= peer }
     @Synchronized fun peerUp(peer: String) { peers += peer; prune(); stored.values.forEach { forward(peer, it) } }

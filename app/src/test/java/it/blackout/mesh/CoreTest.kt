@@ -72,4 +72,15 @@ class CoreTest {
         t += LoraQueue.INTERVAL_MS; assertEquals("00000000000000a4", q.next()!!.id)
         t += LoraQueue.INTERVAL_MS; assertNull(q.next())
     }
+
+    /** After a restart, packets handled earlier but no longer passed on must not be shown again when they come back. */
+    @Test fun restoredSeenIdsAreNotDeliveredAgain() {
+        val got = mutableListOf<String>()
+        val r = MeshRouter({ _, _ -> }, { got += it.id })
+        r.restore(emptyList(), listOf(M1))
+        r.receive("peer", Packet(M1, System.currentTimeMillis(), 16, byteArrayOf(1)))
+        assertTrue(got.isEmpty())
+        r.receive("peer", Packet("00000000000000b2", System.currentTimeMillis(), 16, byteArrayOf(1)))
+        assertEquals(listOf("00000000000000b2"), got)
+    }
 }

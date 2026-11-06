@@ -557,7 +557,7 @@ struct Bubble: View {
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
             if let name { Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.dim).padding(.horizontal, 6) }
-            if let photo, let ui = UIImage(data: photo) {
+            if let photo, let ui = PhotoShrinker.received(photo) {
                 VStack(alignment: .leading, spacing: 0) {
                     Image(uiImage: ui).resizable().scaledToFit().frame(maxWidth: 250)
                     if !text.isEmpty {

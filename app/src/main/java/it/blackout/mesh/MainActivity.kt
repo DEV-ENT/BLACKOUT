@@ -23,13 +23,15 @@ class AppState(a: ComponentActivity) {
     var name by mutableStateOf(prefs.getString("name", "") ?: "")
     var invite by mutableStateOf<SavedGroup?>(null)          // an invite link that was opened
     var shareLocation by mutableStateOf(prefs.getBoolean("shareLocation", false))
-    var permissionsMissing by mutableStateOf(false)
+    var permissionsMissing by mutableStateOf(false) // Bluetooth: without it phones can't connect
+    var locationMissing by mutableStateOf(false)    // precise location: Android needs it to find phones before Android 13
     var tab by mutableIntStateOf(0)
     fun setShareLocation(c: ComponentActivity, on: Boolean) { shareLocation = on; c.getSharedPreferences("mesh", 0).edit().putBoolean("shareLocation", on).apply() }
 }
 
 class MainActivity : ComponentActivity() {
     lateinit var state: AppState
+    private val refresh: () -> Unit = { state.tick++ }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -40,7 +42,8 @@ class MainActivity : ComponentActivity() {
         OfflineMap.setUp(this)
         LocalAi.setUp(this)
         link(intent)
-        if (state.group != null) permissions()
+        MeshEngine.listener = refresh
+        if (state.group != null) { startStore(); permissions() }
         setContent { DarkProofApp(state, this) }
     }
 
@@ -56,33 +59,51 @@ class MainActivity : ComponentActivity() {
         if (g.second != state.group?.code) state.invite = SavedGroup(g.first, g.second)
     }
 
-    override fun onResume() { super.onResume(); Notifier.onScreen = true }
+    override fun onResume() {
+        super.onResume(); Notifier.onScreen = true
+        if (state.group != null && (state.permissionsMissing || state.locationMissing)) check() // back from Settings
+    }
+
+    /** Opens the message store and the group's keys at once, so messages written before the mesh is up are kept. */
+    private fun startStore() {
+        val g = state.group ?: return; val name = state.name
+        Thread { MeshEngine.start(applicationContext, name, g.code) }.start()
+    }
     override fun onPause() { Notifier.onScreen = false; super.onPause() }
 
     /** After the first setup: saves the group and starts the mesh. */
     fun started(name: String, g: SavedGroup) {
         Groups.setUp(this, name, g)
         state.name = name; state.group = g
-        permissions()
+        startStore(); permissions()
     }
 
     fun switchTo(g: SavedGroup) { Groups.switchTo(this, g); state.group = g; state.tick++ }
 
+    private fun granted(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+
+    /** Without these the Bluetooth code would crash, so the mesh starts only with them (Android 12+). */
+    private val bluetooth = if (Build.VERSION.SDK_INT >= 31)
+        listOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN) else emptyList()
+
+    /** Asked for once; location is asked for (fine and coarse together, as Android 12+ requires) but never blocks the app. */
     private fun permissions() {
-        val need = when {
-            Build.VERSION.SDK_INT >= 33 -> listOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.ACCESS_FINE_LOCATION)
-            Build.VERSION.SDK_INT >= 31 -> listOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.ACCESS_FINE_LOCATION)
-            else -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (need.isEmpty()) launch() else requestPermissions(need.toTypedArray(), 1)
+        val wanted = bluetooth + (if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.POST_NOTIFICATIONS) else emptyList()) +
+            listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+        val need = wanted.filterNot(::granted)
+        if (need.isEmpty()) check() else requestPermissions(need.toTypedArray(), 1)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onRequestPermissionsResult(r: Int, p: Array<String>, g: IntArray) {
         super.onRequestPermissionsResult(r, p, g)
-        if (r != 1) return
-        val required = p.filter { it != Manifest.permission.POST_NOTIFICATIONS }
-        state.permissionsMissing = !required.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+        if (r == 1) check() // reads the real state: a cancelled request returns empty arrays
+    }
+
+    /** Starts the mesh when Bluetooth is allowed; without precise location it still runs, with fewer ways to find phones. */
+    private fun check() {
+        state.permissionsMissing = !bluetooth.all(::granted)
+        state.locationMissing = !granted(Manifest.permission.ACCESS_FINE_LOCATION)
         if (!state.permissionsMissing) launch()
     }
 
@@ -91,9 +112,9 @@ class MainActivity : ComponentActivity() {
     private fun launch() {
         val g = state.group ?: return
         startForegroundService(Intent(this, MeshService::class.java).putExtra("name", state.name).putExtra("code", g.code))
-        MeshEngine.listener = { state.tick++ }
         state.tick++
     }
 
-    override fun onDestroy() { MeshEngine.listener = null; super.onDestroy() }
+    // A new screen can start before the old one is destroyed: only unhook our own listener.
+    override fun onDestroy() { if (MeshEngine.listener === refresh) MeshEngine.listener = null; super.onDestroy() }
 }

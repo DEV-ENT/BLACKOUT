@@ -169,4 +169,25 @@ class ProtocolTest {
         codes.forEach { assertTrue(it, Regex("^[A-HJ-NP-Z2-9]{4}(-[A-HJ-NP-Z2-9]{4}){3}$").matches(it)) }
         assertEquals(200, codes.toSet().size)
     }
+
+    @Test fun deliveredListIsACopy() {
+        val d = Deliveries(); val a = "000000000000000a"
+        d.add(Message("r1", 100, "lucia", "Lucia", Receipt.text(listOf(a))))
+        val shown = d.readers(a)
+        d.add(Message("r2", 200, "marco", "Marco", Receipt.text(listOf(a)))) // arrives while the screen reads `shown`
+        assertEquals(1, shown.size); assertEquals(2, d.readers(a).size)
+    }
+
+    @Test fun aiContextFitsTheWindow() {
+        data class T(val user: Boolean, val text: String)
+        val turns = (1..20).flatMap { listOf(T(true, "q$it"), T(false, "a".repeat(300))) }
+        val fit = AiContext.fit(turns, { it.text }, { it.user })
+        assertTrue(fit.size <= AiContext.MAX_TURNS)
+        assertTrue(fit.sumOf { it.text.length } <= AiContext.MAX_HISTORY_CHARS)
+        assertTrue(fit.first().user)                                  // starts with a question
+        assertEquals(turns.last(), fit.last())                         // keeps the newest
+        val huge = listOf(T(true, "q"), T(false, "x".repeat(10_000)))  // one answer bigger than the window
+        assertTrue(AiContext.fit(huge, { it.text }, { it.user }).isEmpty())
+        assertTrue(AiContext.fit(emptyList<T>(), { it.text }, { it.user }).isEmpty())
+    }
 }

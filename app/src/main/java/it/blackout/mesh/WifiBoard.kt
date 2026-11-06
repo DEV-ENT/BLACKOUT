@@ -119,7 +119,7 @@ object WifiBoard {
         }
     }
 
-    private fun handle(s: Socket) = s.use {
+    private fun handle(s: Socket): Unit = s.use {
         try {
             s.soTimeout = 10_000
             val inp = BufferedInputStream(s.getInputStream())

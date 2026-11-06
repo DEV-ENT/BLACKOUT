@@ -60,14 +60,15 @@ private const val TAB_INVITE_ONCE = -1 // after creating a group: Home, with the
 
 /** Welcome, then create or join a group. [askName] is false when adding another group later. */
 @Composable
-fun SetupFlow(invite: SavedGroup?, askName: Boolean, modifier: Modifier = Modifier, done: (name: String, group: SavedGroup, created: Boolean) -> Unit) {
+fun SetupFlow(invite: SavedGroup?, askName: Boolean, modifier: Modifier = Modifier, inSheet: Boolean = false, done: (name: String, group: SavedGroup, created: Boolean) -> Unit) {
     var mode by remember(invite) { mutableStateOf(if (invite != null) "join" else if (askName) "welcome" else "choose") }
     var name by remember { mutableStateOf("") }
     var groupName by remember(invite) { mutableStateOf(invite?.name ?: "") }
     var code by remember(invite) { mutableStateOf(invite?.code ?: "") }
     val ctx = LocalContext.current
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    // In a sheet, the sheet scrolls: a second vertical scroll inside it would crash.
+    val frame = if (inSheet) modifier.fillMaxWidth() else modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 24.dp, vertical = 16.dp)
+    Column(frame, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         when (mode) {
             "welcome", "choose" -> {
                 Spacer(Modifier.height(if (askName) 56.dp else 8.dp))
@@ -152,7 +153,7 @@ fun MainView(s: AppState, a: MainActivity) {
         Sheet.Invite -> InviteSheet(g, close)
         Sheet.Groups -> GroupsSheet(g, a, { sheet = Sheet.Invite }, { sheet = Sheet.NewGroup }, close)
         Sheet.NewGroup -> SheetPage("Another group", close) {
-            SetupFlow(null, askName = false) { _, group, created -> a.switchTo(group); sheet = if (created) Sheet.Invite else null }
+            SetupFlow(null, askName = false, inSheet = true) { _, group, created -> a.switchTo(group); sheet = if (created) Sheet.Invite else null }
         }
         Sheet.Settings -> SettingsSheet(s, a, { sheet = Sheet.NewGroup }, close)
         Sheet.Radio -> RadioSheet(close)
@@ -181,11 +182,21 @@ private fun TabBar(selected: Int, modifier: Modifier, pick: (Int) -> Unit) {
     }
 }
 
-/** Sends a check-in with battery and, if the user turned it on, position. */
-fun checkIn(a: MainActivity, s: AppState, c: CheckIn) {
+/** False (after telling the user) while the message store is still opening, so nothing is silently lost. */
+fun meshReady(c: android.content.Context): Boolean {
+    if (MeshEngine.router != null) return true
+    Toast.makeText(c, "DarkProof is still starting. Try again in a moment.", Toast.LENGTH_LONG).show()
+    return false
+}
+
+/** Sends a check-in with battery and, if the user turned it on, position. False if it couldn't be sent. */
+fun checkIn(a: MainActivity, s: AppState, c: CheckIn): Boolean {
+    if (!meshReady(a)) return false
     val battery = batteryPercent(a)
     fun go(spot: Spot?) = Thread { MeshEngine.send(c.text(battery, spot)) }.start()
     if (s.shareLocation && Locator.allowed(a)) Locator.fix(a) { go(it) } else go(null)
+    Toast.makeText(a, if (c == CheckIn.HELP) "Sending to ${s.group?.name ?: "your group"}" else "Sent to ${s.group?.name ?: "your group"}", Toast.LENGTH_SHORT).show()
+    return true
 }
 
 @Composable
@@ -205,8 +216,12 @@ private fun HomeTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<
             RoundIcon(R.drawable.ic_settings, desc = "Settings") { open(Sheet.Settings) }
         }
         if (s.permissionsMissing) Card {
-            Txt("Permissions needed", 18, FontWeight.Bold, Theme.help)
-            Txt("Without Bluetooth, Wi-Fi and location permissions, DarkProof can't connect phones. Allow them in Settings, then reopen the app.", 15, color = Theme.dim)
+            Txt("Nearby devices permission needed", 18, FontWeight.Bold, Theme.help)
+            Txt("Without it DarkProof can't connect to other phones. Your messages are kept and go out once you allow it in Settings.", 15, color = Theme.dim)
+            GhostButton("Open Settings") { a.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", a.packageName, null))) }
+        } else if (s.locationMissing) Card {
+            Txt("Precise location is off", 18, FontWeight.Bold)
+            Txt("Android uses it to find nearby phones over Bluetooth and Wi-Fi, so DarkProof may find fewer phones. Check-ins and places go out without your position.", 15, color = Theme.dim)
             GhostButton("Open Settings") { a.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", a.packageName, null))) }
         }
         // Hero: the logo's shape, the number of phones in range.
@@ -237,7 +252,7 @@ private fun HomeTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<
             Tip(R.drawable.ic_group, "Farther away? Messages hop through any phone with DarkProof in between. For kilometers, pair a LoRa radio.")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ActionTile("I'm safe", R.drawable.ic_verified_user, Theme.safe, true, Modifier.weight(1f)) { checkIn(a, s, CheckIn.SAFE); Toast.makeText(a, "Sent to ${g.name}", Toast.LENGTH_SHORT).show() }
+            ActionTile("I'm safe", R.drawable.ic_verified_user, Theme.safe, true, Modifier.weight(1f)) { checkIn(a, s, CheckIn.SAFE) }
             ActionTile("Need help", R.drawable.ic_sos, Theme.help, true, Modifier.weight(1f)) { confirmHelp = true }
             ActionTile("Invite", R.drawable.ic_qr_code_2, Theme.text, false, Modifier.weight(1f)) { open(Sheet.Invite) }
             ActionTile("Radio", R.drawable.ic_settings_input_antenna, Theme.text, false, Modifier.weight(1f)) { open(Sheet.Radio) }
@@ -253,7 +268,7 @@ private fun HomeTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<
         }
     }
     if (confirmHelp) Confirm("Send “I need help”?", "Your group sees it right away${if (s.shareLocation) ", with where you are" else ""}. Then write in Chat what you need and where you are.",
-        "Send", danger = true, onYes = { confirmHelp = false; checkIn(a, s, CheckIn.HELP); s.tab = 1 }, onNo = { confirmHelp = false })
+        "Send", danger = true, onYes = { confirmHelp = false; if (checkIn(a, s, CheckIn.HELP)) s.tab = 1 }, onNo = { confirmHelp = false })
 }
 
 @Composable private fun Tip(@DrawableRes icon: Int, text: String) = Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -376,6 +391,8 @@ private fun SettingsSheet(s: AppState, a: MainActivity, add: () -> Unit, close: 
 private fun RadioSheet(close: () -> Unit) {
     val found = remember { mutableStateListOf<Pair<String, String>>() }
     var scanning by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    LaunchedEffect(scanning) { if (scanning) { kotlinx.coroutines.delay(15_500); scanning = false; searched = true } } // LoraLink scans for 15 s
     val ctx = LocalContext.current
     SheetPage("LoRa radio", close) {
         Card {
@@ -384,10 +401,12 @@ private fun RadioSheet(close: () -> Unit) {
             Txt("A Meshtastic radio carries messages for kilometers. Use one with the region already set (EU_868 in Europe). Turn it on near the phone.", 15, color = Theme.dim)
         }
         PrimaryButton(if (scanning) "Searching…" else "Search for radios", enabled = !scanning) {
-            scanning = true; found.clear()
+            if (MeshEngine.lora == null) { Toast.makeText(ctx, "DarkProof is still starting. Try again in a moment.", Toast.LENGTH_LONG).show(); return@PrimaryButton }
+            scanning = true; searched = false; found.clear()
             MeshEngine.lora?.scan { addr, nm -> if (found.none { it.first == addr }) found += addr to nm }
         }
         if (scanning && found.isEmpty()) Txt("Looking for radios nearby… Turn the radio on and keep it next to the phone.", 15, color = Theme.dim)
+        if (searched && found.isEmpty()) Txt("No radio found. Turn it on, keep it next to the phone and search again.", 15, color = Theme.dim)
         if (found.isNotEmpty()) Card(padding = 16.dp) {
             found.forEach { (addr, nm) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {

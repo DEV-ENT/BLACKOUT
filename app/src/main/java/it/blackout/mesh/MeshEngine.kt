@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.os.Handler
 import android.os.Looper
 import java.util.UUID
+import java.util.concurrent.Executors
 
 private class Db(c: Context) : SQLiteOpenHelper(c, "mesh.db", null, 1) {
     override fun onCreate(d: SQLiteDatabase) = d.execSQL("CREATE TABLE p(id TEXT PRIMARY KEY, ts INTEGER, ttl INTEGER, cipher BLOB)")
@@ -23,18 +24,26 @@ sealed class Delivery {
 /** State shared between the service and the UI. */
 object MeshEngine {
     const val MAX_TTL = 16
+    private const val WEEK = 7 * 24 * 3600_000L // how long phones pass messages on (MeshRouter)
+    private const val MAX_PUBLIC = 2_000        // Public messages kept on the phone; older ones are removed
     private val main = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor()
+    private var app: Context? = null
     private var db: SQLiteDatabase? = null
     @Volatile private var crypto: GroupCrypto? = null
     @Volatile private var receiptCrypto: GroupCrypto? = null // the group's receipt key (spec/FORMAT.md, "Delivery receipts")
     private var publicCrypto: GroupCrypto? = null
-    private val messages = ArrayList<Message>()      // this lock also guards deliveries
+    // This lock guards messages, messageIds, deliveries, the database writes and the group keys while they change, so a
+    // packet that arrives during a group switch is neither lost nor shown twice.
+    private val messages = ArrayList<Message>()
+    private val messageIds = HashSet<String>()
     private var deliveries = Deliveries()            // who confirmed which message
     private val ids = Any()                          // guards the three sets below
     private val receiptIds = HashSet<String>()       // receipt packets this phone can open: kept off LoRa
     private val mine = HashSet<String>()             // ids of my own messages
     private val handedOff = HashSet<String>()        // my messages already given to another phone or the radio
-    private val pendingAcks = ArrayList<String>()    // group messages to confirm in the next receipt; main thread only
+    private val pendingAcks = ArrayList<Pair<String, GroupCrypto>>() // message id + its group's receipt key; main thread only
+    private val savedKeys = HashMap<String, Pair<GroupCrypto, GroupCrypto>>() // other saved groups' keys, for pruning
     @Volatile var router: MeshRouter? = null; private set
     var sender: ((String, Packet) -> Unit)? = null
     var lora: LoraLink? = null
@@ -47,48 +56,80 @@ object MeshEngine {
     var transportStatus = "Starting…"
     private var startedAt = 0L
 
+    /** Opens the store and the group's keys. Called by the screen and by the service; only the first call does anything. */
     @Synchronized fun start(c: Context, name: String, code: String) {
         if (router != null) return
+        app = c.applicationContext
         val prefs = c.getSharedPreferences("mesh", 0)
         deviceId = prefs.getString("device", null) ?: UUID.randomUUID().toString().take(12).also { prefs.edit().putString("device", it).apply() }
         this.name = name
         startedAt = System.currentTimeMillis()
-        setKeys(code)
         publicCrypto = GroupCrypto(GroupCrypto.PUBLIC_CODE)
         db = Db(c.applicationContext).writableDatabase
-        val all = load()
-        router = MeshRouter(send = ::route, deliver = ::onDeliver).also { it.restore(all) }
+        val (recent, seen) = synchronized(messages) { setKeys(code); load() }
+        router = MeshRouter(send = ::route, deliver = ::onDeliver).also { it.restore(recent, seen) }
         notifyUi()
     }
 
-    /** Joins another group: confirmations owed to the old one go out first, with its key. Main thread. */
+    /** Joins another group: confirmations owed to the old one go out first, with its key. Main thread; the work runs in the background. */
     fun switchGroup(code: String) {
         flushAcks()
-        setKeys(code)
-        load()
-        notifyUi()
+        io.execute { synchronized(messages) { setKeys(code); load() }; notifyUi() }
     }
 
     fun rename(newName: String) { name = newName.trim().take(40).ifEmpty { name }; notifyUi() }
 
     private fun setKeys(code: String) { val c = GroupCrypto(code); crypto = c; receiptCrypto = c.receipts() }
 
-    /** Messages, receipts and the ids of my own messages, from stored packets. */
-    private fun load(): List<Packet> {
-        val all = ArrayList<Packet>()
-        db?.rawQuery("SELECT id,ts,ttl,cipher FROM p ORDER BY ts", null)?.use { q ->
-            while (q.moveToNext()) all += Packet(q.getString(0), q.getLong(1), q.getInt(2), q.getBlob(3))
-        }
-        val msgs = ArrayList<Message>(); val d = Deliveries(); val own = HashSet<String>(); val rIds = HashSet<String>()
+    /** Keys of the groups the user switched away from: their messages are kept even when this group can't read them. */
+    private fun otherGroupKeys(): List<Pair<GroupCrypto, GroupCrypto>> {
+        val c = app ?: return emptyList()
+        return Groups.others(c).map { g -> synchronized(savedKeys) { savedKeys.getOrPut(g.code) { GroupCrypto(g.code).let { it to it.receipts() } } } }
+    }
+
+    /**
+     * Rebuilds messages and receipts from the database, one row at a time, and prunes it: packets older than 7 days that
+     * no saved group can read are removed (phones stop passing them on after 7 days anyway), and so are Public messages
+     * beyond the newest 2,000. Returns what the router keeps passing on (the newest 500 of the last 7 days) and every id
+     * it has seen in that time. Hold the messages lock.
+     */
+    private fun load(): Pair<List<Packet>, Set<String>> {
+        val d = db ?: return emptyList<Packet>() to emptySet()
+        val cut = System.currentTimeMillis() - WEEK
+        val others = otherGroupKeys()
         val rc = receiptCrypto
-        for (p in all) {
-            val m = read(p)
-            if (m != null) { msgs += m; if (m.sender == deviceId) own += m.id }
-            else rc?.open(p)?.let { d.add(it); rIds += p.id }
+        val recent = ArrayDeque<Packet>(); val seen = HashSet<String>()
+        val msgs = ArrayList<Message>(); val dl = Deliveries(); val own = HashSet<String>(); val rIds = HashSet<String>()
+        val drop = ArrayList<String>()
+        d.rawQuery("SELECT id,ts,ttl,cipher FROM p ORDER BY ts", null).use { q ->
+            while (q.moveToNext()) {
+                val p = Packet(q.getString(0), q.getLong(1), q.getInt(2), q.getBlob(3))
+                if (p.ts >= cut) { seen += p.id; recent.addLast(p); if (recent.size > 500) recent.removeFirst() }
+                val m = read(p)
+                if (m != null) { msgs += m; if (m.sender == deviceId) own += m.id; continue }
+                val r = rc?.open(p)
+                if (r != null) { dl.add(r); rIds += p.id; continue }
+                if (p.ts < cut && others.none { (g, gr) -> g.open(p) != null || gr.open(p) != null }) drop += p.id
+            }
+        }
+        val pub = msgs.filter { it.public }
+        if (pub.size > MAX_PUBLIC) {
+            val old = pub.take(pub.size - MAX_PUBLIC).map { it.id }.toHashSet()
+            msgs.removeAll { it.id in old }; drop += old
+        }
+        if (drop.isNotEmpty()) {
+            d.beginTransaction()
+            try {
+                drop.chunked(500).forEach { c -> d.delete("p", "id IN (${c.joinToString(",") { "?" }})", c.toTypedArray()) }
+                d.setTransactionSuccessful()
+            } finally { d.endTransaction() }
+            LanTest.log("store: removed ${drop.size} old packets")
         }
         synchronized(ids) { mine += own; receiptIds += rIds }
-        synchronized(messages) { messages.clear(); messages += msgs; deliveries = d }
-        return all
+        messages.clear(); messages += msgs
+        messageIds.clear(); msgs.mapTo(messageIds) { it.id }
+        deliveries = dl
+        return recent.toList() to seen
     }
 
     private fun save(p: Packet) {
@@ -109,39 +150,50 @@ object MeshEngine {
 
     /** A packet seen for the first time: keep it, and show it if it belongs to this group or the Public channel. */
     private fun onDeliver(p: Packet) {
-        save(p)
-        val m = read(p)
-        if (m != null) {
-            synchronized(messages) { messages += m; messages.sortBy { it.ts } }
-            LanTest.log("received ${p.id} ${if (m.public) "public" else "group"} from ${m.name} photo=${m.photo?.size ?: 0}")
-            if (!m.public && m.sender != deviceId) main.post { ack(m.id); onIncoming?.invoke(m) }
-        } else {
-            val r = receiptCrypto?.open(p) ?: run { notifyUi(); return }
-            synchronized(ids) { receiptIds += p.id }
-            synchronized(messages) { deliveries.add(r) }
-            val confirmed = Receipt.ids(r.text); val mineNow = synchronized(ids) { confirmed.count { it in mine } }
-            LanTest.log("receipt ${p.id} from ${r.name} confirms ${confirmed.size} message(s), $mineNow of mine")
+        var incoming: Message? = null; var group: GroupCrypto? = null; var receiptKey: GroupCrypto? = null
+        synchronized(messages) {
+            group = crypto; receiptKey = receiptCrypto
+            save(p)
+            val m = read(p)
+            if (m != null) {
+                if (messageIds.add(m.id)) { messages += m; messages.sortBy { it.ts } }
+                LanTest.log("received ${p.id} ${if (m.public) "public" else "group"} from ${m.name} photo=${m.photo?.size ?: 0}")
+                if (!m.public && m.sender != deviceId) incoming = m
+            } else {
+                val r = receiptKey?.open(p)
+                if (r != null) {
+                    synchronized(ids) { receiptIds += p.id }
+                    deliveries.add(r)
+                    val confirmed = Receipt.ids(r.text); val mineNow = synchronized(ids) { confirmed.count { it in mine } }
+                    LanTest.log("receipt ${p.id} from ${r.name} confirms ${confirmed.size} message(s), $mineNow of mine")
+                }
+            }
+        }
+        incoming?.let { m ->
+            val key = receiptKey!!; val g = group
+            main.post { ack(m.id, key); if (crypto === g) onIncoming?.invoke(m) } // no alert for a group the user just left
         }
         notifyUi()
     }
 
-    /** This group's message, else a Public channel message, else null (relayed but not shown). */
-    private fun read(p: Packet): Message? = crypto?.open(p) ?: publicCrypto?.open(p)?.copy(public = true)
+    /** This group's message, else a Public channel message (photos are group-only: dropped), else null (relayed, not shown). */
+    private fun read(p: Packet): Message? = crypto?.open(p) ?: publicCrypto?.open(p)?.copy(public = true, photo = null)
 
-    /** Confirms a group message in the next receipt; messages arriving within 2 seconds share one. Main thread. */
-    private fun ack(id: String) {
-        pendingAcks += id
+    /** Confirms a group message in the next receipt, with that group's key; messages within 2 seconds share one. Main thread. */
+    private fun ack(id: String, key: GroupCrypto) {
+        pendingAcks += id to key
         if (pendingAcks.size == 1) main.postDelayed(::flushAcks, 2_000)
     }
 
     private fun flushAcks() {
-        val rc = receiptCrypto ?: return; val r = router ?: return
+        val r = router ?: return
         val batch = pendingAcks.toList(); pendingAcks.clear()
-        for (b in Receipt.batches(batch)) {
+        for ((rc, msgIds) in batch.groupBy({ it.second }, { it.first })) for (b in Receipt.batches(msgIds)) {
             val id = Packet.newId(); val ts = System.currentTimeMillis()
             val p = Packet(id, ts, MAX_TTL, rc.seal(id, ts, deviceId, name, Receipt.text(b)))
             synchronized(ids) { receiptIds += id }
-            save(p); r.publish(p)
+            synchronized(messages) { save(p) }
+            r.publish(p)
         }
     }
 
@@ -152,12 +204,16 @@ object MeshEngine {
     fun sendFromBoard(who: String, text: String) { post("web-$deviceId", "$who (Wi-Fi board)", text, public = true) }
 
     private fun post(senderId: String, from: String, text: String, public: Boolean, photo: ByteArray? = null): Boolean {
-        val cr = (if (public) publicCrypto else crypto) ?: return true; val r = router ?: return true
+        val r = router ?: return true
         val id = Packet.newId(); val ts = System.currentTimeMillis()
-        val p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, senderId, from, text, photo))
-        save(p)
+        val p: Packet
+        synchronized(messages) {
+            val cr = (if (public) publicCrypto else crypto) ?: return true
+            p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, senderId, from, text, if (public) null else photo))
+            save(p)
+            messages += Message(id, ts, senderId, from, text, public, if (public) null else photo); messageIds += id
+        }
         synchronized(ids) { mine += id }
-        synchronized(messages) { messages += Message(id, ts, senderId, from, text, public, photo) }
         r.publish(p); notifyUi()
         return Meshtastic.fits(p)
     }

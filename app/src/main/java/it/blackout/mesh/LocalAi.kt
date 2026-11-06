@@ -134,10 +134,14 @@ object LocalAi {
             return
         }
         part(m).delete()
-        val id = app.getSystemService(DownloadManager::class.java).enqueue(
-            DownloadManager.Request(Uri.parse(m.url)).setTitle("DarkProof AI: ${m.title}")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-                .setDestinationUri(Uri.fromFile(part(m))))
+        val id = try {
+            app.getSystemService(DownloadManager::class.java).enqueue(
+                DownloadManager.Request(Uri.parse(m.url)).setTitle("DarkProof AI: ${m.title}")
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                    .setDestinationUri(Uri.fromFile(part(m))))
+        } catch (e: Exception) { // e.g. no shared storage: DownloadManager can only write there
+            states[m.id] = State.Failed("The download can't start on this phone (${e.message ?: "storage unavailable"})."); return
+        }
         prefs.edit().putLong("download.${m.id}", id).apply()
         states[m.id] = State.Downloading(0f)
         watch(m)
@@ -212,6 +216,12 @@ object LocalAi {
     @Volatile private var stopped = false
     fun stop() { stopped = true; running?.cancelProcess() }
 
+    /** The model holds over a GB of memory in the process that also relays messages: let it go after 5 idle minutes. */
+    private val release = Runnable { if (!busy) work.execute { if (!busy) { engine?.close(); engine = null; engineId = null } } }
+    private const val IDLE_MS = 5 * 60_000L
+    private const val ANSWER_TIMEOUT_S = 180L
+    @Volatile private var answerMs = 0L // time of the last answer, without loading the model
+
     /**
      * Adds the question and generates the answer with the earlier conversation as context. [system] holds the
      * instructions and the group's situation. Main thread; [done] gets the answer.
@@ -223,14 +233,14 @@ object LocalAi {
         if (m == null || states[m.id] != State.Ready) {
             finish(Turn("assistant", "No AI model on this phone yet. Download one first.", true), done); return
         }
-        val history = conversation.dropLast(1).filter { !it.isError }.takeLast(12)
+        val history = AiContext.fit(conversation.dropLast(1).filter { !it.isError }, { it.text }, { it.role == "user" })
         conversation += Turn("assistant", "…")
         busy = true; stopped = false
-        val t0 = System.currentTimeMillis()
+        main.removeCallbacks(release)
         work.execute {
             val r = generate(m, system, history, question) { partial -> main.post { if (busy) conversation[conversation.lastIndex] = Turn("assistant", partial) } }
-            if (!r.isError && !stopped) record(m, (System.currentTimeMillis() - t0) / 1000.0) // stopped answers would skew the speed
-            main.post { conversation.removeAt(conversation.lastIndex); finish(r, done) }
+            if (!r.isError && !stopped) record(m, answerMs / 1000.0) // stopped answers would skew the speed
+            main.post { conversation.removeAt(conversation.lastIndex); finish(r, done); main.postDelayed(release, IDLE_MS) }
         }
     }
 
@@ -244,8 +254,11 @@ object LocalAi {
         val gpuKey = "gpu.${m.id}"
         if (backendName == "GPU" && prefs.getString(gpuKey, null) != "yes") {
             if (!r.isError) { prefs.edit().putString(gpuKey, "yes").apply(); return r }
+            if (stopped) return r // the user stopped it: not the GPU's fault, and don't ask again
             engine?.close(); engine = null; engineId = null // "no" is already saved: the next load uses the CPU
-            return attempt(m, system, history, question, onText)
+            val again = attempt(m, system, history, question, onText)
+            if (again.isError) prefs.edit().remove(gpuKey).apply() // the CPU failed too: the GPU wasn't the problem
+            return again
         }
         return r
     }
@@ -270,6 +283,7 @@ object LocalAi {
             running = conv
             val text = StringBuilder(); var error: Throwable? = null
             val finished = CountDownLatch(1)
+            val t0 = System.currentTimeMillis()
             conv.sendMessageAsync(question, object : MessageCallback {
                 override fun onMessage(message: LmMessage) {
                     text.append(message.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text })
@@ -278,7 +292,12 @@ object LocalAi {
                 override fun onDone() = finished.countDown()
                 override fun onError(throwable: Throwable) { error = throwable; finished.countDown() }
             })
-            finished.await()
+            if (!finished.await(ANSWER_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)) { // never wait forever
+                conv.cancelProcess(); finished.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                running = null; runCatching { conv.close() }
+                return Turn("assistant", "The answer took too long and was stopped. Try a shorter question.", true)
+            }
+            answerMs = System.currentTimeMillis() - t0
             running = null; conv.close()
             error?.let { if (text.isEmpty()) return Turn("assistant", "AI error: ${it.message}", true) }
             val answer = text.toString().trim()

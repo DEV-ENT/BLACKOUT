@@ -15,6 +15,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -51,8 +52,11 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
     var everyone by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     val shown = remember(messages, everyone) { messages.filter { it.public == everyone } }
+    // Receipts change no message, so the list above stays the same: delivery states are read again on every update.
+    val tick = s.tick
+    val deliveries = remember(tick, shown) { shown.filter { it.sender == MeshEngine.deviceId }.associate { it.id to MeshEngine.delivery(it) } }
     val list = rememberLazyListState()
-    LaunchedEffect(shown.size, everyone) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1) }
+    LaunchedEffect(shown.size, everyone) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1, 100_000) } // the offset is clamped: the very end
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) Thread {
             val jpeg = PhotoShrinker.jpeg(ctx, uri)
@@ -76,10 +80,9 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
                     Txt(if (everyone) "Messages here reach everyone nearby." else "Say hi, or tap I'm safe on Home.", 15, color = Theme.dim)
                 }
             }
-            items(shown, key = { it.id }) { m ->
-                val i = shown.indexOf(m)
+            itemsIndexed(shown, key = { _, m -> m.id }) { i, m ->
                 val firstOfRun = i == 0 || shown[i - 1].sender != m.sender || CheckIn.of(shown[i - 1].text) != null
-                MessageRow(m, firstOfRun, open)
+                MessageRow(m, firstOfRun, deliveries[m.id], open)
             }
         }
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -91,7 +94,7 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
             RoundIcon(R.drawable.ic_arrow_upward, 52.dp, tint = if (draft.isBlank()) Theme.dim else Color.Black,
                 bg = if (draft.isBlank()) Theme.tile else Color.White, desc = "Send") {
                 val t = draft.trim()
-                if (t.isNotEmpty() && MeshEngine.router != null) {
+                if (t.isNotEmpty() && meshReady(ctx)) {
                     draft = ""
                     val pub = everyone
                     Thread {
@@ -107,7 +110,7 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
 }
 
 @Composable
-private fun MessageRow(m: Message, firstOfRun: Boolean, open: (Sheet) -> Unit) {
+private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, open: (Sheet) -> Unit) {
     val ctx = LocalContext.current
     val me = m.sender == MeshEngine.deviceId
     val check = if (!m.public) CheckIn.of(m.text) else null
@@ -129,7 +132,7 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, open: (Sheet) -> Unit) {
                 CheckIn.spot(m.text)?.let { sp ->
                     if (!me) Txt("Find ${m.name}", 14, FontWeight.SemiBold, Theme.dim, Modifier.clickable { open(Sheet.Find(m.name, sp, m.ts)) }.padding(start = 18.dp, top = 6.dp))
                 }
-                if (me) Status(m, null)
+                if (me) Status(delivery, null)
             }
             place != null -> {
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Theme.card).clickable(enabled = place.spot != null) {
@@ -149,14 +152,14 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, open: (Sheet) -> Unit) {
                 val fg = if (me) Color.Black else Theme.text
                 Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(22.dp)).background(bubble)) {
                     m.photo?.let { jpeg ->
-                        val img = remember(m.id) { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap() }
+                        val img = remember(m.id) { decodePhoto(jpeg)?.asImageBitmap() }
                         if (img != null) Image(img, "Photo", Modifier.fillMaxWidth().aspectRatio(img.width.toFloat() / img.height.coerceAtLeast(1))
                             .clickable { open(Sheet.ViewPhoto(jpeg)) }, contentScale = ContentScale.Crop)
                     }
                     val text = if (m.photo != null) Photo.caption(m.text) else m.text
                     if (text.isNotEmpty()) Txt(text, 17, color = fg, modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
                 }
-                if (me) Status(m, time) else Txt(time, 13, color = Theme.dim, modifier = Modifier.padding(start = 14.dp, top = 3.dp))
+                if (me) Status(delivery, time) else Txt(time, 13, color = Theme.dim, modifier = Modifier.padding(start = 14.dp, top = 3.dp))
             }
         }
     }
@@ -164,8 +167,7 @@ private fun MessageRow(m: Message, firstOfRun: Boolean, open: (Sheet) -> Unit) {
 
 /** Under my messages: still waiting, given to a phone, or confirmed by group members. */
 @Composable
-private fun Status(m: Message, time: String?) {
-    val d = MeshEngine.delivery(m)
+private fun Status(d: Delivery?, time: String?) {
     val label = when (d) {
         is Delivery.Delivered -> {
             val n = d.readers.map { it.name }
@@ -194,10 +196,27 @@ private data class Shared(val place: Place, val by: String, val ts: Long, val id
 @Composable fun KindIcon(k: PlaceKind) = Box(Modifier.size(48.dp).background(Theme.tile, CircleShape), contentAlignment = Alignment.Center) { Ic(kindIcon(k), Theme.text, 24.dp) }
 
 /** My position while a screen that needs it is open. */
+/**
+ * Runs [start] while the app is on screen, and the stop function it returns when the app goes to the background or this
+ * part of the screen goes away: GPS and the compass sensor must not keep running behind a closed app.
+ */
+@Composable fun WhileOnScreen(start: () -> (() -> Unit)) {
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        var stop: (() -> Unit)? = null
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_START && stop == null) stop = start()
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) { stop?.invoke(); stop = null }
+        }
+        lifecycle.addObserver(obs) // replays ON_START if the app is already on screen
+        onDispose { lifecycle.removeObserver(obs); stop?.invoke(); stop = null }
+    }
+}
+
 @Composable fun rememberMySpot(): Spot? {
     val ctx = LocalContext.current
     var spot by remember { mutableStateOf<Spot?>(null) }
-    DisposableEffect(Unit) { val stop = Locator.watch(ctx) { spot = it }; onDispose { stop() } }
+    WhileOnScreen { Locator.watch(ctx) { spot = it } }
     return spot
 }
 
@@ -302,6 +321,7 @@ fun AddPlaceSheet(close: () -> Unit) {
         if (withSpot && !Locator.allowed(ctx)) Txt("Location is off for DarkProof: the place will be shared without a position.", 14, color = Theme.help)
         Txt("Everyone nearby can see it, from any group. It stays on phones for up to 7 days.", 14, color = Theme.dim)
         PrimaryButton(if (sending) "Finding your position…" else "Share", enabled = !sending) {
+            if (!meshReady(ctx)) return@PrimaryButton
             fun go(sp: Spot?) { Thread { MeshEngine.send(Place(kind, note, sp).text, public = true) }.start(); close() }
             if (withSpot && Locator.allowed(ctx)) { sending = true; Locator.fix(ctx) { go(it) } } else go(null)
         }
@@ -323,7 +343,7 @@ fun PeopleTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<Messag
         }
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             BigCheckIn("I'm safe", R.drawable.ic_verified_user, Theme.safe, Color.Black, Modifier.weight(1f)) {
-                checkIn(a, s, CheckIn.SAFE); Toast.makeText(a, "Sent to ${g.name}", Toast.LENGTH_SHORT).show()
+                checkIn(a, s, CheckIn.SAFE)
             }
             BigCheckIn("I need help", R.drawable.ic_sos, Theme.help, Color.White, Modifier.weight(1f)) { confirmHelp = true }
         }
@@ -335,7 +355,7 @@ fun PeopleTab(s: AppState, a: MainActivity, g: SavedGroup, messages: List<Messag
         SecondaryButton("Invite friends", icon = R.drawable.ic_qr_code_2) { open(Sheet.Invite) }
     }
     if (confirmHelp) Confirm("Send “I need help”?", "Your group sees it right away${if (s.shareLocation) ", with where you are" else ""}. Then write in Chat what you need and where you are.",
-        "Send", danger = true, onYes = { confirmHelp = false; checkIn(a, s, CheckIn.HELP); s.tab = 1 }, onNo = { confirmHelp = false })
+        "Send", danger = true, onYes = { confirmHelp = false; if (checkIn(a, s, CheckIn.HELP)) s.tab = 1 }, onNo = { confirmHelp = false })
 }
 
 /** The big check-in tiles, in the logo's shape. */
@@ -357,7 +377,7 @@ fun FindSheet(f: Sheet.Find, close: () -> Unit) {
     val me = rememberMySpot()
     var heading by remember { mutableStateOf<Float?>(null) }
     var compass by remember { mutableStateOf(true) }
-    DisposableEffect(Unit) { val stop = Compass.watch(ctx) { h -> if (h == null) compass = false else heading = h }; onDispose { stop() } }
+    WhileOnScreen { Compass.watch(ctx) { h -> if (h == null) compass = false else heading = h } }
     SheetPage(f.title, close) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (me == null) {
@@ -387,20 +407,21 @@ fun FindSheet(f: Sheet.Find, close: () -> Unit) {
 
 @Composable
 fun SendPhotoSheet(jpeg: ByteArray, close: () -> Unit) {
+    val ctx = LocalContext.current
     var caption by remember { mutableStateOf("") }
-    val img = remember(jpeg) { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap() }
+    val img = remember(jpeg) { decodePhoto(jpeg)?.asImageBitmap() }
     SheetPage("Send photo", close) {
         if (img != null) Image(img, "Photo", Modifier.fillMaxWidth().aspectRatio(img.width.toFloat() / img.height).clip(RoundedCornerShape(22.dp)), contentScale = ContentScale.Crop)
         Txt("${jpeg.size / 1000} KB, small enough to hop phone to phone.", 14, color = Theme.dim)
         InputField("Caption", caption, { caption = it.take(200) }, "Bridge is out", keyboard = KeyboardOptions(KeyboardCapitalization.Sentences))
         Txt("Only your group can see it. Phones without the newest DarkProof show “📷 Photo” instead.", 14, color = Theme.dim)
-        PrimaryButton("Send photo") { Thread { MeshEngine.send(Photo.text(caption), photo = jpeg) }.start(); close() }
+        PrimaryButton("Send photo") { if (!meshReady(ctx)) return@PrimaryButton; Thread { MeshEngine.send(Photo.text(caption), photo = jpeg) }.start(); close() }
     }
 }
 
 @Composable
 fun ViewPhotoSheet(jpeg: ByteArray, close: () -> Unit) {
-    val img = remember(jpeg) { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap() }
+    val img = remember(jpeg) { decodePhoto(jpeg)?.asImageBitmap() }
     SheetPage("Photo", close) {
         if (img != null) Image(img, "Photo", Modifier.fillMaxWidth().aspectRatio(img.width.toFloat() / img.height).clip(RoundedCornerShape(16.dp)), contentScale = ContentScale.Fit)
     }
@@ -451,7 +472,7 @@ fun situation(g: SavedGroup, messages: List<Message>, me: Spot? = null): String 
 
 /** The assistant's instructions and the group's situation, like the iPhone. */
 fun aiSystem(g: SavedGroup, messages: List<Message>, me: Spot? = null) =
-    LocalAi.instructions + "\n\n" + LocalAi.situationIntro + "\n" + situation(g, messages, me)
+    LocalAi.instructions + "\n\n" + LocalAi.situationIntro + "\n" + situation(g, messages, me).take(AiContext.MAX_SITUATION_CHARS)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -461,10 +482,10 @@ fun AskTab(g: SavedGroup, messages: List<Message>) {
     val m = LocalAi.model(LocalAi.selected)
     val ready = m != null && LocalAi.states[m.id] == LocalAi.State.Ready
     val turns = LocalAi.conversation
-    val me = rememberMySpot()
+    val ctx = LocalContext.current
     val list = rememberLazyListState()
     LaunchedEffect(turns.size, turns.lastOrNull()?.text?.length) { if (turns.isNotEmpty()) list.scrollToItem(turns.size - 1) }
-    fun send(q: String) { if (q.isNotBlank() && !LocalAi.busy) { LocalAi.ask(q.trim(), aiSystem(g, messages, me)); draft = "" } }
+    fun send(q: String) { if (q.isNotBlank() && !LocalAi.busy) { LocalAi.ask(q.trim(), aiSystem(g, messages, Locator.lastKnown(ctx))); draft = "" } }
     val typing = WindowInsets.isImeVisible
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().padding(bottom = if (typing) 0.dp else 84.dp)) {
         Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

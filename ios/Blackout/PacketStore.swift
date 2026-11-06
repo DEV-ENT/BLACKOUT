@@ -27,6 +27,24 @@ final class PacketStore {
         return out
     }
 
+    /// Removes the packets with these ids. Re-reads the file under the lock, so packets appended meanwhile are kept.
+    func remove(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard let d = try? Data(contentsOf: url) else { return }
+        let b = [UInt8](d)
+        var out = Data(capacity: d.count), i = 0
+        while i + 4 <= b.count {
+            let n = Int(b[i]) << 24 | Int(b[i + 1]) << 16 | Int(b[i + 2]) << 8 | Int(b[i + 3])
+            guard n > 0, i + 4 + n <= b.count else { break }
+            let body = Data(b[(i + 4)..<(i + 4 + n)])
+            if let p = Packet.decode(body), ids.contains(p.id) { i += 4 + n; continue }
+            out.append(contentsOf: b[i..<(i + 4 + n)])
+            i += 4 + n
+        }
+        try? out.write(to: url, options: .atomic)
+    }
+
     func append(_ p: Packet) {
         let e = p.encode()
         let rec = Data([UInt8(e.count >> 24 & 0xFF), UInt8(e.count >> 16 & 0xFF), UInt8(e.count >> 8 & 0xFF), UInt8(e.count & 0xFF)]) + e
