@@ -51,6 +51,8 @@ object MeshEngine {
     var ble: BleLink? = null
     /** Phones on the same Wi-Fi network; runs without the service, so it works even without Bluetooth permission. */
     @Volatile var wifi: WifiLink? = null; private set
+    /** Public Nostr relays while there is internet; also bridges this phone's neighbourhood. */
+    @Volatile var nostr: NostrLink? = null; private set
     var listener: (() -> Unit)? = null
     /** A new group message from someone else, on the main thread (for notifications). */
     var onIncoming: ((Message) -> Unit)? = null
@@ -72,8 +74,21 @@ object MeshEngine {
         val (recent, seen) = synchronized(messages) { setKeys(code); load() }
         router = MeshRouter(send = ::route, deliver = ::onDeliver).also { it.restore(recent, seen) }
         if (prefs.getBoolean("wifiNetwork", true)) setWifi(true)
+        if (prefs.getBoolean("internet", true)) setInternet(true)
         notifyUi()
     }
+
+    /** Turns the internet relays on or off (Connections screen), and remembers it. */
+    @Synchronized fun setInternet(on: Boolean) {
+        val c = app ?: return
+        c.getSharedPreferences("mesh", 0).edit().putBoolean("internet", on).apply()
+        nostr?.stop(); nostr = null
+        if (on) nostr = NostrLink(c, { router }, ::mailboxes, ::notifyUi, Tor.proxy(c)).also { it.start() }
+        notifyUi()
+    }
+
+    /** This phone's relay mailboxes: its group's and the Public channel's (spec/FORMAT.md, "Mailboxes"). */
+    private fun mailboxes(): Set<Int> = setOfNotNull(crypto?.mailbox, publicCrypto?.mailbox)
 
     /** Turns linking over Wi-Fi networks on or off (Connections screen), and remembers it. */
     @Synchronized fun setWifi(on: Boolean) {
@@ -86,7 +101,7 @@ object MeshEngine {
     /** Joins another group: confirmations owed to the old one go out first, with its key. Main thread; the work runs in the background. */
     fun switchGroup(code: String) {
         flushAcks()
-        io.execute { synchronized(messages) { setKeys(code); load() }; notifyUi() }
+        io.execute { synchronized(messages) { setKeys(code); load() }; nostr?.resubscribe(); notifyUi() }
     }
 
     fun rename(newName: String) { name = newName.trim().take(40).ifEmpty { name }; notifyUi() }
@@ -154,7 +169,12 @@ object MeshEngine {
     private fun route(peer: String, p: Packet) {
         val lora = peer == LoraLink.PEER || peer == MeshCoreLink.PEER
         if (lora && synchronized(ids) { p.id in receiptIds }) return // receipts stay off LoRa, where airtime is scarce
-        if (WifiLinks.owns(peer)) wifi?.links?.send(peer, p) else (sender ?: return)(peer, p)
+        when {
+            WifiLinks.owns(peer) -> wifi?.links?.send(peer, p)
+            // A packet that hasn't hopped yet (one less than MAX_TTL after forward) was written on this phone.
+            NostrLink.owns(peer) -> { nostr?.send(p, mine = p.ttl >= MAX_TTL - 1); return } // "handed off" = to a phone
+            else -> (sender ?: return)(peer, p)
+        }
         if (lora && !(if (peer == LoraLink.PEER) Meshtastic.fits(p) else MeshCore.fits(p))) return // too long for the radio: not really sent
         if (synchronized(ids) { p.id in mine && handedOff.add(p.id) }) notifyUi()
     }
@@ -200,7 +220,7 @@ object MeshEngine {
         val r = router ?: return
         val batch = pendingAcks.toList(); pendingAcks.clear()
         for ((rc, msgIds) in batch.groupBy({ it.second }, { it.first })) for (b in Receipt.batches(msgIds)) {
-            val id = Packet.newId(); val ts = System.currentTimeMillis()
+            val id = Packet.newId(rc.mailbox); val ts = System.currentTimeMillis()
             val p = Packet(id, ts, MAX_TTL, rc.seal(id, ts, deviceId, name, Receipt.text(b)))
             synchronized(ids) { receiptIds += id }
             synchronized(messages) { save(p) }
@@ -216,10 +236,11 @@ object MeshEngine {
 
     private fun post(senderId: String, from: String, text: String, public: Boolean, photo: ByteArray? = null): Boolean {
         val r = router ?: return true
-        val id = Packet.newId(); val ts = System.currentTimeMillis()
-        val p: Packet
+        val ts = System.currentTimeMillis()
+        val p: Packet; val id: String
         synchronized(messages) {
             val cr = (if (public) publicCrypto else crypto) ?: return true
+            id = Packet.newId(cr.mailbox)
             p = Packet(id, ts, MAX_TTL, cr.seal(id, ts, senderId, from, text, if (public) null else photo))
             save(p)
             messages += Message(id, ts, senderId, from, text, public, if (public) null else photo); messageIds += id

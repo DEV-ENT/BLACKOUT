@@ -200,4 +200,15 @@ class ProtocolTest {
             StatusShare.text(CheckIn.SAFE, "Ben", 101, Spot(-33.8688, 151.2093)))
         assertTrue(StatusShare.text(CheckIn.HELP, "x".repeat(60), 100, Spot(-89.99999, -179.99999, 99_999)).length <= 160)
     }
+
+    /** Same values as the iPhone (and Python, see spec/FORMAT.md "Mailboxes"). */
+    @Test fun mailboxes() {
+        assertEquals(0xa8d0, GroupCrypto("test-group-1").mailbox)
+        assertEquals(0x0794, GroupCrypto(GroupCrypto.PUBLIC_CODE).mailbox)
+        assertEquals(0xa8d0, GroupCrypto("test-group-1").receipts().mailbox) // receipts go to the group's mailbox
+        val id = Packet.newId(0xa8d0)
+        assertTrue(id.matches(Regex("^a8d0[0-9a-f]{12}$"))); assertEquals(0xa8d0, Packet.mailbox(id))
+        assertNotEquals(Packet.newId(0xa8d0), Packet.newId(0xa8d0))
+        assertEquals("0794", Packet.newId(0x0794).take(4))
+    }
 }

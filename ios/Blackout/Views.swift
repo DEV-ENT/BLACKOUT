@@ -100,7 +100,7 @@ struct SetupView: View {
                 Button { mode = .join } label: { Label("Join a group", systemImage: "qrcode.viewfinder") }.buttonStyle(SecondaryButton())
             }
             .padding(.top, 36)
-            Text("Free and private. No servers, ever.").font(.footnote).foregroundStyle(Theme.faint)
+            Text("Free and private. No account, and no servers of ours.").font(.footnote).foregroundStyle(Theme.faint)
                 .frame(maxWidth: .infinity).padding(.top, 14)
         }
         .padding(.horizontal, 24).padding(.bottom, 12)
@@ -375,12 +375,22 @@ struct ChatView: View {
     @State private var takingPhoto = false
     @State private var pending: PendingPhoto?
     @State private var viewing: ViewedPhoto?
+    @State private var blocking: Message?
     @State private var photoFailed = false
     @ObservedObject private var loc = LocationService.shared
     @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
     private var shown: [Message] { engine.messages.filter { $0.isPublic == toPublic } }
+
+    @ViewBuilder private func moderationMenu(_ m: Message) -> some View {
+        Button(role: .destructive) { blocking = m } label: { Label("Block \(m.name)", systemImage: "hand.raised") }
+        if m.isPublic {
+            Button(role: .destructive) { Moderation.report(m.id); engine.moderationChanged() } label: {
+                Label("Report this message", systemImage: "exclamationmark.bubble")
+            }
+        }
+    }
 
     var body: some View {
         let list = shown
@@ -439,6 +449,7 @@ struct ChatView: View {
                                     }
                                 }
                                 .padding(.top, newRun && i > 0 ? 10 : 0)
+                                .contextMenu { if !mine { moderationMenu(m) } } // hold: Block, and Report on Public
                                 .id(m.id)
                             }
                         }
@@ -477,6 +488,12 @@ struct ChatView: View {
         .sheet(item: $readers) { DeliveredSheet(readers: $0.readers) }
         .sheet(item: $findingPlace) { FindSheet(place: $0.place, by: $0.by, ts: $0.ts) }
         .sheet(item: $viewing) { PhotoViewer(jpeg: $0.jpeg, caption: $0.caption, from: $0.from) }
+        .confirmationDialog("Block \(blocking?.name ?? "")?", isPresented: Binding(get: { blocking != nil }, set: { if !$0 { blocking = nil } }),
+                            titleVisibility: .visible, presenting: blocking) { m in
+            Button("Block", role: .destructive) { Moderation.block(m.sender, name: m.name); engine.moderationChanged(); blocking = nil }
+        } message: { _ in
+            Text("You won't see their messages, places or check-ins on this phone. You can unblock them in Settings.")
+        }
         .sheet(item: $pending) { p in
             PhotoSendSheet(photo: p, groupName: groupName) { caption in
                 engine.send(Photo.text(caption: caption), photo: p.jpeg)
@@ -911,6 +928,7 @@ struct ModelPicker: View {
 struct ConnectionsView: View {
     @ObservedObject var engine: Engine
     @AppStorage("wifiNetwork") private var wifiOn = true
+    @AppStorage("internet") private var internetOn = true
     @AppStorage("name") private var myName = ""
     @State private var address = ""
     @State private var share: ShareText?
@@ -919,7 +937,7 @@ struct ConnectionsView: View {
 
     var body: some View {
         SheetPage(title: "Connections") {
-            Text("The ways your messages travel. None of them needs internet.")
+            Text("The ways your messages travel. All but Internet keep working in a blackout.")
                 .font(.system(size: 15)).foregroundStyle(Theme.dim)
             Card {
                 HStack {
@@ -934,6 +952,7 @@ struct ConnectionsView: View {
                 }
             }
             wifiCard
+            internetCard
             RadioCard(engine: engine, kind: .meshtastic)
             RadioCard(engine: engine, kind: .meshcore)
             Card {
@@ -947,7 +966,24 @@ struct ConnectionsView: View {
             }
         }
         .onChange(of: wifiOn) { on in engine.setWifi(on) }
+        .onChange(of: internetOn) { on in engine.setInternet(on) }
         .sheet(item: $share) { s in ActivityView(items: [s.text]).ignoresSafeArea() }
+    }
+
+    private var internetCard: some View {
+        Card {
+            Toggle(isOn: $internetOn) {
+                Text("Internet").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+            }
+            .tint(Theme.safe)
+            Text("While there is Wi-Fi or mobile data, messages also travel through free public relays (Nostr), so friends far away get them and this iPhone passes on its neighbours' messages. In a blackout the other ways keep working. Group messages stay encrypted; relays see your internet address unless you use Tor.")
+                .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            if internetOn {
+                let n = engine.relaysLinked
+                Text(n > 0 ? "Connected to \(n) of \(engine.nostr.total) relays" : "No internet right now: the other ways keep working")
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(n > 0 ? Theme.safe : Theme.dim)
+            }
+        }
     }
 
     private var wifiCard: some View {

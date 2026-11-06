@@ -24,4 +24,5 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:12.3.1") // offline street maps (OpenFreeMap)
     implementation("com.squareup.okhttp3:okhttp:4.12.0") // MapLibre's HTTP client: User-Agent and 4-connection limit
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // Android's org.json is only a stub in unit tests
 }

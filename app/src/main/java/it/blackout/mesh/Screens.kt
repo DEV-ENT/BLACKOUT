@@ -11,6 +11,9 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -82,7 +85,7 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
             }
             itemsIndexed(shown, key = { _, m -> m.id }) { i, m ->
                 val firstOfRun = i == 0 || shown[i - 1].sender != m.sender || CheckIn.of(shown[i - 1].text) != null
-                MessageRow(m, firstOfRun, deliveries[m.id], open)
+                MessageRow(m, firstOfRun, deliveries[m.id], open) { s.moderated++ }
             }
         }
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -109,14 +112,28 @@ fun ChatTab(s: AppState, g: SavedGroup, messages: List<Message>, phones: Int, op
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, open: (Sheet) -> Unit) {
+private fun MessageRow(m: Message, firstOfRun: Boolean, delivery: Delivery?, open: (Sheet) -> Unit, moderated: () -> Unit) {
     val ctx = LocalContext.current
     val me = m.sender == MeshEngine.deviceId
     val check = if (!m.public) CheckIn.of(m.text) else null
     val place = if (m.public) Place.of(m.text) else null
     val time = clock(ctx, m.ts)
-    Column(Modifier.fillMaxWidth().padding(top = if (firstOfRun) 8.dp else 0.dp), horizontalAlignment = if (me && check == null && place == null) Alignment.End else Alignment.Start) {
+    var menu by remember { mutableStateOf(false) }
+    var confirmBlock by remember { mutableStateOf(false) }
+    // Hold someone else's message for Block (and Report on the Public channel).
+    val hold = if (me) Modifier else Modifier.combinedClickable(onLongClick = { menu = true }, onClick = {})
+    if (confirmBlock) Confirm("Block ${m.name}?", "You won't see their messages, places or check-ins on this phone. You can unblock them in Settings.", "Block", danger = true,
+        onYes = { confirmBlock = false; Moderation.block(ctx, m.sender, m.name); moderated() }, onNo = { confirmBlock = false })
+    DropdownMenu(menu, { menu = false }, containerColor = Theme.card) {
+        DropdownMenuItem(text = { Txt("Block ${m.name}", 16) }, onClick = { menu = false; confirmBlock = true })
+        if (m.public) DropdownMenuItem(text = { Txt("Report this message", 16, color = Theme.help) }, onClick = {
+            menu = false; Moderation.hide(ctx, m.id); NostrReports.report(ctx, m.id); moderated()
+            Toast.makeText(ctx, "Reported and hidden", Toast.LENGTH_SHORT).show()
+        })
+    }
+    Column(Modifier.fillMaxWidth().then(hold).padding(top = if (firstOfRun) 8.dp else 0.dp), horizontalAlignment = if (me && check == null && place == null) Alignment.End else Alignment.Start) {
         when {
             check != null -> {
                 val c = if (check == CheckIn.HELP) Theme.help else Theme.safe

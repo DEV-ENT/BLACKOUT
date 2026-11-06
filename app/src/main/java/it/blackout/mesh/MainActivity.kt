@@ -26,6 +26,7 @@ class AppState(a: ComponentActivity) {
     var permissionsMissing by mutableStateOf(false) // Bluetooth: without it phones can't connect
     var locationMissing by mutableStateOf(false)    // precise location: Android needs it to find phones before Android 13
     var tab by mutableIntStateOf(0)
+    var moderated by mutableIntStateOf(0) // changes when someone is blocked or a message reported
     fun setShareLocation(c: ComponentActivity, on: Boolean) { shareLocation = on; c.getSharedPreferences("mesh", 0).edit().putBoolean("shareLocation", on).apply() }
 }
 

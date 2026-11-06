@@ -31,6 +31,7 @@ final class Engine: ObservableObject {
     @Published private(set) var wifiNetworkLinks = 0 // phones linked over a Wi-Fi network (WifiLink)
     @Published private(set) var radioLinked = false
     @Published private(set) var meshcoreLinked = false
+    @Published private(set) var relaysLinked = 0     // internet relays connected right now (NostrLink)
     @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
     @Published private(set) var name: String
     @Published private(set) var deliveries = Deliveries()  // who confirmed which message (spec/FORMAT.md, "Delivery receipts")
@@ -55,6 +56,7 @@ final class Engine: ObservableObject {
     private(set) var lora: LoraLink!
     private(set) var meshcore: MeshCoreLink!
     private(set) var wifi: WifiLink!
+    private(set) var nostr: NostrLink!
 
     init(name: String, code: String) {
         let d = UserDefaults.standard
@@ -77,6 +79,10 @@ final class Engine: ObservableObject {
         meshcore = MeshCoreLink(router: router) { [weak self] s in self?.setStatus("3b-meshcore", s) }
         wifi = WifiLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("4-wifi", s) }
         if d.object(forKey: "wifiNetwork") as? Bool ?? true { wifi.start() }
+        nostr = NostrLink(router: router, mailboxes: { [weak self] in self?.mailboxes() ?? [] }) { [weak self] s in
+            self?.setStatus("5-internet", s)
+        }
+        if d.object(forKey: "internet") as? Bool ?? true { nostr.start() }
         #if DEBUG
         DebugLog.start()
         BleLink.restoredHook = { DebugLog.write("bluetooth " + $0) }
@@ -95,6 +101,15 @@ final class Engine: ObservableObject {
         if on { wifi.start() } else { wifi.stop() }
     }
 
+    /// Turns the internet relays on or off (Connections screen), and remembers it.
+    func setInternet(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "internet")
+        if on { nostr.start() } else { nostr.stop() }
+    }
+
+    /// This phone's relay mailboxes: its group's and the Public channel's (spec/FORMAT.md, "Mailboxes").
+    private func mailboxes() -> [UInt16] { [crypto.mailbox, publicCrypto.mailbox] }
+
     /// Switches to another group (or just another name) without restarting the radios: every phone relays every
     /// group anyway. Messages of the old group stay stored and come back on rejoining. Call on the main thread.
     func rejoin(name: String, code: String) {
@@ -103,6 +118,7 @@ final class Engine: ObservableObject {
         cryptoLock.withLock { _crypto = c; _receipts = r }
         self.name = name
         load(store.loadAll())
+        nostr.resubscribe() // the relays now send the new group's mailbox
     }
 
     /// At most once a day, in the background: forgets packets older than 7 days that no saved group can read (phones
@@ -136,6 +152,9 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// After blocking, unblocking or reporting: shows the messages again with the new rules. Main thread.
+    func moderationChanged() { load(store.loadAll()) }
+
     /// Messages, receipts and the ids of my own messages, from stored packets. Main thread.
     private func load(_ all: [Packet]) {
         let rc = receiptCrypto
@@ -145,15 +164,16 @@ final class Engine: ObservableObject {
             else if let r = rc.open(p) { receipts.append(r); rIds.insert(p.id) }
         }
         idsLock.withLock { mine.formUnion(own); receiptIds.formUnion(rIds) }
-        messages = msgs.sorted { $0.ts < $1.ts }
+        messages = msgs.filter(Moderation.visible).sorted { $0.ts < $1.ts } // blocked and reported hidden everywhere
         deliveries = Deliveries(receipts)
     }
 
     /// Writes a message from this phone, to the group or to the Public channel. Call on the main thread.
     /// Returns false if it is too long for a LoRa packet (it still travels over Bluetooth and Wi-Fi).
     @discardableResult func send(_ text: String, isPublic: Bool = false, photo: Data? = nil) -> Bool {
-        let id = Packet.newId(), ts = Int64(Date().timeIntervalSince1970 * 1000)
-        guard let c = try? (isPublic ? publicCrypto : crypto).seal(id: id, ts: ts, sender: deviceId, name: name, text: text, photo: photo)
+        let cr = isPublic ? publicCrypto : crypto
+        let id = Packet.newId(mailbox: cr.mailbox), ts = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let c = try? cr.seal(id: id, ts: ts, sender: deviceId, name: name, text: text, photo: isPublic ? nil : photo)
         else { return true }
         let p = Packet(id: id, ts: ts, ttl: Self.maxTtl, cipher: c)
         idsLock.withLock { _ = mine.insert(id) }
@@ -171,6 +191,7 @@ final class Engine: ObservableObject {
             self.bluetoothLinks = bt.count; self.wifiLinks = mc.count + net.count; self.wifiNetworkLinks = net.count
             self.linkedNodes = all
             self.phones = all.count; self.radioLinked = self.lora.connected; self.meshcoreLinked = self.meshcore.connected
+            self.relaysLinked = self.nostr?.connected ?? 0
         }
     }
 
@@ -190,6 +211,8 @@ final class Engine: ObservableObject {
         else if peer.hasPrefix(BleLink.prefix) { ble.send(peer, p) }
         else if peer.hasPrefix(MultipeerLink.prefix) { mc.send(peer, p) }
         else if peer.hasPrefix(WifiLink.prefix) { wifi.send(peer, p) }
+        // A packet that hasn't hopped yet (one less than maxTtl after forwarding) was written on this phone.
+        else if peer == NostrLink.peer { nostr.send(p, mine: p.ttl >= Self.maxTtl - 1); return } // "handed off" = to a phone
         if newlyMine {
             idsLock.withLock { _ = marked.insert(p.id) }
             DispatchQueue.main.async { self.handedOff.insert(p.id) }
@@ -211,6 +234,7 @@ final class Engine: ObservableObject {
         #endif
         if let m = read(p) {
             DispatchQueue.main.async {
+                guard Moderation.visible(m) else { if !m.isPublic && m.sender != self.deviceId { self.ack(m.id) }; return }
                 self.messages.append(m)
                 self.messages.sort { $0.ts < $1.ts }
                 if !m.isPublic && m.sender != self.deviceId {
@@ -234,7 +258,7 @@ final class Engine: ObservableObject {
         let ids = pendingAcks, rc = receiptCrypto
         pendingAcks = []
         for batch in Receipt.batches(ids) {
-            let id = Packet.newId(), ts = Int64(Date().timeIntervalSince1970 * 1000)
+            let id = Packet.newId(mailbox: rc.mailbox), ts = Int64(Date().timeIntervalSince1970 * 1000)
             guard let c = try? rc.seal(id: id, ts: ts, sender: deviceId, name: name, text: Receipt.text(for: batch)) else { continue }
             let p = Packet(id: id, ts: ts, ttl: Self.maxTtl, cipher: c)
             idsLock.withLock { _ = receiptIds.insert(id) }

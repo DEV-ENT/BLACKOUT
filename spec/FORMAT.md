@@ -136,7 +136,52 @@ When a phone gets a new group message from someone else, it confirms it with a r
 | LoRa via Meshtastic | The packet is `Data.payload` on port 256 (`PRIVATE_APP`), broadcast on channel 0 with hop limit 3. The whole packet must be ≤ 233 bytes. |
 | LoRa via MeshCore | Channel data on the `#darkproof` channel, flooded. The whole packet must be ≤ 163 bytes. See below. |
 | Bluetooth LE (Android and iPhone) | See below. |
+| Internet relays (Android and iPhone) | Nostr events over WebSocket. See below. |
 | Apple peer-to-peer (iPhone only) | MultipeerConnectivity. Each packet is one `.reliable` message. See below. |
+
+## Internet relays
+
+While there is internet (Wi-Fi, 4G, satellite), phones also exchange packets through free public **Nostr** relays
+(NIP-01), optionally through Tor. DarkProof runs no server. The relays are one more peer for forwarding: a phone sends
+them every packet it has and gets the packets of its mailboxes, so a phone that still has internet during a blackout
+bridges its neighbourhood to the rest of the network.
+
+### Mailboxes
+
+The first 2 bytes of a new packet id are its **mailbox**; the other 6 bytes are random. The mailbox of a group is the
+first 2 bytes of HMAC-SHA256(group key, `darkproof-relay-mailbox-v1`). Group messages and their delivery receipts use
+the group's mailbox; Public messages use the mailbox of the Public channel key. Anyone can read the mailbox from the id
+of any packet, so a phone can bridge packets it cannot open. Packets from older apps have random ids.
+
+- Test values: group `test-group-1` → mailbox `a8d0`; the Public channel → `0794`.
+- Someone who sees packets can tell which ones share a mailbox, not what they say. Many groups share each of the
+  65,536 mailboxes. Ids keep 48 random bits, so duplicates stay negligible.
+
+### Events
+
+- **Kind:** `3871`, a regular (stored) kind. It is not in the NIPs list or the registry of kinds, and no events of
+  nearby kinds were found on 11 public relays (2026-11).
+- **Relays:** `wss://nos.lol`, `wss://relay.damus.io`, `wss://relay.primal.net`, `wss://nostr.mom`,
+  `wss://nostr.oxtr.dev`, `wss://relay.ditto.pub`. All free, with no sign-up, payment or proof of work; all keep events
+  at least 7 days, and all stored a 22 KB event of this kind from a new key (tested 2026-11-06). Phones use all of them
+  at once, so one being down doesn't matter. Relays with a "web of trust" rule refuse large events from new keys.
+- **Tags:** `["t", "dp1-<mailbox as 4 hex digits>"]`, `["x", "<packet id>"]` and
+  `["expiration", "<created_at + 604800>"]` (NIP-40: relays may delete it after 7 days).
+- **Content:** the packet (0xB2 encoding) in standard base64.
+- **Key:** a new random secp256k1 key every time the app starts, so relays can't link one session to the next.
+  The signature (BIP-340) only satisfies the relays: who wrote a message is inside the encrypted packet.
+- **Subscribe:** `["REQ", <id>, {"kinds": [3871], "#t": ["dp1-<own group>", "dp1-0794"], "since": now - 604800,
+  "limit": 500}]` on every relay.
+- **Publish:** at most one event every 1.5 s, to every connected relay, newest packet first. Packets written on this
+  phone (still at full TTL) in the last 2 minutes go first. All others (bridging, and older own packets, which may
+  have gone up before the app was killed) are first looked up with
+  `["REQ", <id>, {"kinds": [3871], "#x": [<up to 50 packet ids>], "limit": <count>}]`; only those no relay returns
+  within 6 s are posted, at most one every 4.5 s. Each packet goes up once from each phone; packets that came from
+  relays never go back up. Delivery receipts are sent too.
+- **Throttling:** a relay that refuses an event with a reason starting `rate` (`rate-limited:`, `rate limited`),
+  `blocked` or `banned` gets no more events from this phone for 10 minutes (it keeps the subscription).
+- **Reports:** a reported Public message is hidden on the phone, and a NIP-56 report (kind 1984, tags
+  `["e", <event id>, "other"]` and `["p", <author>]`) goes to the relays.
 
 ## Wi-Fi networks
 

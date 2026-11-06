@@ -26,6 +26,10 @@ class Packet(val id: String, val ts: Long, val ttl: Int, val cipher: ByteArray) 
         private const val HEADER = 18
         const val MAX_CIPHER = 16_000
         fun newId(): String = ByteArray(8).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        /** A new id whose first 2 bytes are the [mailbox] (spec/FORMAT.md, "Mailboxes"), the other 6 random. */
+        fun newId(mailbox: Int): String = "%04x".format(mailbox and 0xFFFF) + newId().substring(4)
+        /** The mailbox of any packet id. */
+        fun mailbox(id: String): Int = id.substring(0, 4).toInt(16)
         fun decode(raw: ByteArray): Packet? {
             if (raw.size <= HEADER || raw.size > HEADER + MAX_CIPHER || raw[0] != MAGIC.toByte()) return null
             return try {
@@ -44,13 +48,15 @@ class Packet(val id: String, val ts: Long, val ttl: Int, val cipher: ByteArray) 
 data class Message(val id: String, val ts: Long, val sender: String, val name: String, val text: String,
                    val public: Boolean = false, val photo: ByteArray? = null)
 
-class GroupCrypto private constructor(private val keyBytes: ByteArray) {
-    constructor(code: String) : this(deriveKey(code))
+class GroupCrypto private constructor(private val keyBytes: ByteArray, mailbox: Int?) {
+    constructor(code: String) : this(deriveKey(code), null)
+    /** The group's relay mailbox (spec/FORMAT.md, "Mailboxes"): receipts share it, so members get them too. */
+    val mailbox: Int = mailbox ?: deriveMailbox(keyBytes)
     private val key = SecretKeySpec(keyBytes, "AES")
     private val rnd = SecureRandom()
 
     /** The group's delivery-receipt key (spec/FORMAT.md, "Delivery receipts"). */
-    fun receipts() = GroupCrypto(deriveReceiptKey(keyBytes))
+    fun receipts() = GroupCrypto(deriveReceiptKey(keyBytes), mailbox)
 
     /** [iv] is random in normal use; tests pass a fixed one to reproduce spec/test-vectors.txt. [photo]: 4th field. */
     fun seal(id: String, ts: Long, sender: String, name: String, text: String, photo: ByteArray? = null,
@@ -84,6 +90,10 @@ class GroupCrypto private constructor(private val keyBytes: ByteArray) {
         fun deriveKey(code: String): ByteArray = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             .generateSecret(PBEKeySpec(java.text.Normalizer.normalize(code, java.text.Normalizer.Form.NFC).toCharArray(),
                 "blackout-mesh-v1".toByteArray(), 120_000, 256)).encoded
+        /** First 2 bytes of HMAC-SHA256(group key, "darkproof-relay-mailbox-v1"), as a number 0-65535. */
+        fun deriveMailbox(groupKey: ByteArray): Int = Mac.getInstance("HmacSHA256").run {
+            init(SecretKeySpec(groupKey, "HmacSHA256")); doFinal("darkproof-relay-mailbox-v1".toByteArray())
+        }.let { ((it[0].toInt() and 0xFF) shl 8) or (it[1].toInt() and 0xFF) }
         /** HKDF-SHA256 (RFC 5869) of the group key, no salt, info "darkproof-receipt-v1", 32 bytes. */
         fun deriveReceiptKey(groupKey: ByteArray): ByteArray {
             val prk = Mac.getInstance("HmacSHA256").run { init(SecretKeySpec(ByteArray(32), "HmacSHA256")); doFinal(groupKey) }

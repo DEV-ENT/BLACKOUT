@@ -79,7 +79,7 @@ fun SetupFlow(invite: SavedGroup?, askName: Boolean, modifier: Modifier = Modifi
                 Spacer(Modifier.height(24.dp))
                 PrimaryButton("Create a new group") { mode = "create" }
                 SecondaryButton("Join with code") { mode = "join" }
-                Txt("Free and private. No servers, ever.", 14, color = Theme.faint, modifier = Modifier.align(Alignment.CenterHorizontally))
+                Txt("Free and private. No account, and no servers of ours.", 14, color = Theme.faint, modifier = Modifier.align(Alignment.CenterHorizontally))
             }
             "create" -> {
                 FormTitle("Create a group", "For your family, friends or building. DarkProof makes a secret code for it, then you invite people with a QR code.") { mode = if (askName) "welcome" else "choose" }
@@ -126,13 +126,14 @@ sealed class Sheet {
 
 /** Phones linked directly right now (not the LoRa radio). */
 fun phonesInRange(): Int = (MeshEngine.router?.peerCount() ?: 0) - (if (MeshEngine.lora?.connected == true) 1 else 0) -
-    (if (MeshEngine.meshcore?.connected == true) 1 else 0)
+    (if (MeshEngine.meshcore?.connected == true) 1 else 0) - (if (MeshEngine.nostr?.isUp == true) 1 else 0)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainView(s: AppState, a: MainActivity) {
     val tick = s.tick
-    val messages = remember(tick) { MeshEngine.snapshot() }
+    val moderated = s.moderated
+    val messages = remember(tick, moderated) { MeshEngine.snapshot().filter { Moderation.visible(a, it) } } // blocked and reported hidden everywhere
     val phones = remember(tick) { phonesInRange() }
     var sheet by remember { mutableStateOf<Sheet?>(null) }
     LaunchedEffect(s.tab) { if (s.tab == TAB_INVITE_ONCE) { s.tab = 0; sheet = Sheet.Invite } }
@@ -380,6 +381,19 @@ private fun SettingsSheet(s: AppState, a: MainActivity, add: () -> Unit, close: 
             }
         }
         SecondaryButton("Join or start another group", icon = R.drawable.ic_add) { add() }
+        key(s.moderated) {
+            val blocked = Moderation.blocked(a)
+            if (blocked.isNotEmpty()) Card {
+                Txt("Blocked people", 16, FontWeight.SemiBold)
+                Txt("Their messages, places and check-ins are hidden on this phone.", 14, color = Theme.dim)
+                blocked.forEach { (id, n) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Txt(n, 16, modifier = Modifier.weight(1f), maxLines = 1)
+                        GhostButton("Unblock") { Moderation.unblock(a, id); s.moderated++ }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -389,7 +403,7 @@ private fun ConnectionsSheet(s: AppState, a: MainActivity, close: () -> Unit) {
     val tick = s.tick
     val ctx = LocalContext.current
     SheetPage("Connections", close) {
-        Txt("The ways your messages travel. None of them needs internet.", 15, color = Theme.dim)
+        Txt("The ways your messages travel. All but Internet keep working in a blackout.", 15, color = Theme.dim)
         key(tick) {
             val phones = phonesInRange()
             Card {
@@ -401,6 +415,7 @@ private fun ConnectionsSheet(s: AppState, a: MainActivity, close: () -> Unit) {
                 Txt("Nearby: ${MeshEngine.transportStatus} · ${MeshEngine.ble?.statusLine() ?: "Bluetooth LE: off"}", 13, color = Theme.faint)
             }
             WifiCard()
+            InternetCard()
             RadioCard("LoRa radio · Meshtastic",
                 "Reaches other radios kilometers away: about 2–10 km in a city, more from high places. Short messages only. Use a Meshtastic radio with the region set (EU_868 in Europe).",
                 MeshEngine.lora?.status?.removePrefix("LoRa: "), MeshEngine.lora?.connected == true,
@@ -418,6 +433,18 @@ private fun ConnectionsSheet(s: AppState, a: MainActivity, close: () -> Unit) {
                 GhostButton("Share “I need help”") { shareStatus(a, s, CheckIn.HELP) }
             }
         }
+    }
+}
+
+/** Internet relays: on/off and how many answer. */
+@Composable
+private fun InternetCard() {
+    val n = MeshEngine.nostr
+    Card {
+        SwitchRow("Internet", n != null, { MeshEngine.setInternet(it) },
+            "While there is Wi-Fi or mobile data, messages also travel through free public relays (Nostr), so friends far away get them and this phone passes on its neighbours' messages. In a blackout the other ways keep working. Group messages stay encrypted; relays see your internet address unless you use Tor.")
+        if (n != null) Txt(if (n.connected > 0) "Connected to ${n.connected} of ${n.total} relays" else "No internet right now: the other ways keep working",
+            15, FontWeight.SemiBold, if (n.connected > 0) Theme.safe else Theme.dim)
     }
 }
 

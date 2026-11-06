@@ -48,14 +48,26 @@ public final class GroupCrypto: Sendable {
     /// Code of the Public channel: everyone knows it, so anyone can read and post (spec/FORMAT.md).
     public static let publicCode = "blackout-public"
     private let key: SymmetricKey
+    /// The group's relay mailbox (spec/FORMAT.md, "Mailboxes"): receipts share it, so members get them too.
+    public let mailbox: UInt16
 
-    public init(code: String) { key = SymmetricKey(data: GroupCrypto.deriveKey(code)) }
-    private init(key: SymmetricKey) { self.key = key }
+    public init(code: String) {
+        let k = GroupCrypto.deriveKey(code)
+        key = SymmetricKey(data: k); mailbox = GroupCrypto.deriveMailbox(k)
+    }
+    private init(key: SymmetricKey, mailbox: UInt16) { self.key = key; self.mailbox = mailbox }
+
+    /// First 2 bytes of HMAC-SHA256(group key, "darkproof-relay-mailbox-v1").
+    public static func deriveMailbox(_ groupKey: Data) -> UInt16 {
+        let mac = HMAC<SHA256>.authenticationCode(for: Data("darkproof-relay-mailbox-v1".utf8), using: SymmetricKey(data: groupKey))
+        let b = Array(mac)
+        return UInt16(b[0]) << 8 | UInt16(b[1])
+    }
 
     /// The group's delivery-receipt key (spec/FORMAT.md, "Delivery receipts"). Apps that don't know receipts can't
     /// open them with the group or public key, so they relay them without showing them.
     public func receipts() -> GroupCrypto {
-        GroupCrypto(key: SymmetricKey(data: key.withUnsafeBytes { GroupCrypto.deriveReceiptKey(Data($0)) }))
+        GroupCrypto(key: SymmetricKey(data: key.withUnsafeBytes { GroupCrypto.deriveReceiptKey(Data($0)) }), mailbox: mailbox)
     }
 
     /// HKDF-SHA256 of the group key, no salt, info "darkproof-receipt-v1", 32 bytes.

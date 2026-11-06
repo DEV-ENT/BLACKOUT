@@ -31,6 +31,14 @@ public struct Packet: Equatable, Sendable {
 
     public func withTtl(_ t: Int) -> Packet { Packet(id: id, ts: ts, ttl: t, cipher: cipher) }
 
+    /// A new id whose first 2 bytes are the mailbox (spec/FORMAT.md, "Mailboxes"), the other 6 random.
+    public static func newId(mailbox: UInt16) -> String {
+        String(format: "%04x", mailbox) + newId().dropFirst(4)
+    }
+
+    /// The mailbox of any packet id.
+    public static func mailbox(of id: String) -> UInt16 { UInt16(id.prefix(4), radix: 16) ?? 0 }
+
     public static func newId() -> String {
         var g = SystemRandomNumberGenerator() // cryptographically secure on Apple platforms
         return Hex.encode(Data((0..<8).map { _ in UInt8.random(in: .min ... .max, using: &g) }))

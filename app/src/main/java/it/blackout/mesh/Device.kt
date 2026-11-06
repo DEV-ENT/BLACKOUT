@@ -216,6 +216,36 @@ object Groups {
     }
 }
 
+/**
+ * People the user blocked and messages the user reported: both are hidden everywhere (chats, places, people, alerts).
+ * Kept only on this phone. Reports also go to the internet relays (NostrLink) when there is internet.
+ */
+object Moderation {
+    private fun prefs(c: Context) = c.getSharedPreferences("mesh", 0)
+    @Volatile private var blockedCache: Map<String, String>? = null
+    @Volatile private var hiddenCache: Set<String>? = null
+
+    /** Blocked sender ids and the name they had. */
+    fun blocked(c: Context): Map<String, String> = blockedCache ?: runCatching {
+        val o = JSONObject(prefs(c).getString("blocked", "{}")!!); o.keys().asSequence().associateWith { o.getString(it) }
+    }.getOrDefault(emptyMap()).also { blockedCache = it }
+
+    fun block(c: Context, id: String, name: String) = saveBlocked(c, blocked(c) + (id to name))
+    fun unblock(c: Context, id: String) = saveBlocked(c, blocked(c) - id)
+    private fun saveBlocked(c: Context, m: Map<String, String>) {
+        blockedCache = m; prefs(c).edit().putString("blocked", JSONObject(m).toString()).apply()
+    }
+
+    /** Ids of messages the user reported or hid. */
+    fun hidden(c: Context): Set<String> = hiddenCache ?: (prefs(c).getStringSet("hidden", emptySet())!!.toSet()).also { hiddenCache = it }
+    fun hide(c: Context, messageId: String) {
+        val s = (hidden(c) + messageId).toList().takeLast(2_000).toSet()
+        hiddenCache = s; prefs(c).edit().putStringSet("hidden", s).apply()
+    }
+
+    fun visible(c: Context, m: Message) = m.sender !in blocked(c) && m.id !in hidden(c)
+}
+
 /** Alerts for new group messages while DarkProof is not on screen. Made on the phone: no internet needed. */
 object Notifier {
     private const val MESSAGES = "messages"; private const val HELP = "help"
@@ -229,7 +259,7 @@ object Notifier {
     }
 
     private fun received(c: Context, m: Message) {
-        if (onScreen) return
+        if (onScreen || !Moderation.visible(c, m)) return
         if (c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= 33) return
         val group = Groups.current(c)?.name ?: "your group"
         val check = CheckIn.of(m.text)

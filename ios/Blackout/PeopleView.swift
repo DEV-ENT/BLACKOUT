@@ -350,6 +350,7 @@ struct GroupSheet: View {
     @State private var groupDraft = ""
     @State private var joinCode = ""
     @State private var saved: [SavedGroups.Entry] = []
+    @State private var blocked: [String: String] = [:]
     @AppStorage(LocationService.shareKey) private var shareLocation = false
     @ObservedObject private var loc = LocationService.shared
     @ObservedObject private var notifier = Notifier.shared
@@ -421,6 +422,20 @@ struct GroupSheet: View {
                     }
                 }
             }
+            if !blocked.isEmpty {
+                Card {
+                    Text("Blocked people").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                    Text("Their messages, places and check-ins are hidden on this phone.").font(.system(size: 15)).foregroundStyle(Theme.dim)
+                    ForEach(blocked.sorted(by: { $0.value < $1.value }), id: \.key) { id, name in
+                        HStack {
+                            Text(name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
+                            Spacer()
+                            Button("Unblock") { Moderation.unblock(id); blocked = Moderation.blocked; engine.moderationChanged() }
+                                .buttonStyle(GhostButton())
+                        }
+                    }
+                }
+            }
             Card {
                 Text("Join or start another group").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
                 InputField(label: "Group code", hint: "Easier: point the iPhone Camera at a friend's invite QR.") {
@@ -439,7 +454,7 @@ struct GroupSheet: View {
                     .font(.footnote).foregroundStyle(Theme.dim)
             }
         }
-        .onAppear { nameDraft = myName; groupDraft = groupName; saved = SavedGroups.all() }
+        .onAppear { nameDraft = myName; groupDraft = groupName; saved = SavedGroups.all(); blocked = Moderation.blocked }
     }
 
     private func clean(_ s: String, _ max: Int) -> String {

@@ -6,11 +6,22 @@ struct BlackoutApp: App {
     init() {
         OfflineMap.shared.setUp()
         Notifier.shared.setUp() // before launch ends, so tapping an alert that relaunched the app is handled
-        Mesh.shared.startIfSetUp() // also when iOS relaunches the app in the background for Bluetooth
         #if DEBUG
         let args = CommandLine.arguments // devicectl ... launch --console it.darkproof.mesh aiSelfTest <model file>
+        if let i = args.firstIndex(of: "join"), args.indices.contains(i + 1), let bar = args[i + 1].firstIndex(of: "|") {
+            // join "Name|code": the test group, like Android's --es join (group codes never go in logs)
+            UserDefaults.standard.set(String(args[i + 1][..<bar]), forKey: "name")
+            UserDefaults.standard.set(String(args[i + 1][args[i + 1].index(after: bar)...]), forKey: "code")
+        }
+        if let i = args.firstIndex(of: "set"), args.indices.contains(i + 2) { // set wifiNetwork 0
+            UserDefaults.standard.set(args[i + 2] == "1", forKey: args[i + 1])
+        }
+        #endif
+        Mesh.shared.startIfSetUp() // also when iOS relaunches the app in the background for Bluetooth
+        #if DEBUG
         if let i = args.firstIndex(of: "aiSelfTest") { LocalAi.selfTest(args.indices.contains(i + 1) ? args[i + 1] : nil) }
         if let i = args.firstIndex(of: "interopTest"), args.indices.contains(i + 1) { InteropTest.run(args[i + 1]) }
+        if args.contains("samples") { InteropTest.samples(after: 8) } // no link: the messages go by whatever is up, e.g. relays
         #endif
     }
 
@@ -29,17 +40,23 @@ enum InteropTest {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             guard let e = Mesh.shared.engine else { DebugLog.write("interop: no group"); return }
             e.wifi.connect(host: host, port: port)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                let spot = Spot(lat: 45.46420, lon: 9.19000, accuracy: 12)
-                e.send(CheckIn.safe.text(battery: 64, spot: spot))
-                e.send(Place(kind: .water, note: "Fountain in the square", spot: spot).text, isPublic: true)
-                let img = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240)).image { c in
-                    UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
-                    UIColor.white.setFill(); c.fill(CGRect(x: 100, y: 60, width: 120, height: 120))
-                }
-                if let jpeg = PhotoShrinker.jpeg(img) { e.send(Photo.text(caption: "From the iPhone"), photo: jpeg) }
-                DebugLog.write("interop: sent check-in, place, photo")
+            samples(after: 4)
+        }
+    }
+
+    static func samples(after delay: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard let e = Mesh.shared.engine else { DebugLog.write("interop: no group"); return }
+            let spot = Spot(lat: 45.46420, lon: 9.19000, accuracy: 12)
+            e.send(CheckIn.safe.text(battery: 64, spot: spot))
+            e.send(Place(kind: .water, note: "Fountain in the square", spot: spot).text, isPublic: true)
+            let img = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240)).image { c in
+                UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+                UIColor.white.setFill(); c.fill(CGRect(x: 100, y: 60, width: 120, height: 120))
             }
+            if let jpeg = PhotoShrinker.jpeg(img) { e.send(Photo.text(caption: "From the iPhone"), photo: jpeg) }
+            e.send("Hello from the iPhone")
+            DebugLog.write("interop: sent check-in, place, photo, text")
         }
     }
 }
