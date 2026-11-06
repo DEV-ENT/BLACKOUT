@@ -12,10 +12,20 @@ final class Engine: ObservableObject {
     @Published private(set) var radioLinked = false
     @Published private(set) var linkedNodes: Set<String> = [] // node ids linked directly right now
     @Published private(set) var name: String
+    @Published private(set) var deliveries = Deliveries()  // who confirmed which message (spec/FORMAT.md, "Delivery receipts")
+    @Published private(set) var handedOff: Set<String> = [] // ids of my messages given to at least one phone
     let deviceId: String
-    private var _crypto: GroupCrypto // the group key; read from the router's thread, so guarded by cryptoLock
+    let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
+    private var _crypto: GroupCrypto   // the group key; read from the router's thread, so guarded by cryptoLock
+    private var _receipts: GroupCrypto // the group's receipt key, same lock
     private let cryptoLock = NSLock()
     private var crypto: GroupCrypto { cryptoLock.withLock { _crypto } }
+    private var receiptCrypto: GroupCrypto { cryptoLock.withLock { _receipts } }
+    private let idsLock = NSLock()
+    private var mine = Set<String>()       // ids of messages written on this phone; guarded by idsLock
+    private var marked = Set<String>()     // of those, already reported as handed off; guarded by idsLock
+    private var receiptIds = Set<String>() // receipt packets this phone can open, kept off LoRa; guarded by idsLock
+    private var pendingAcks: [String] = [] // group messages to confirm in the next receipt; main thread only
     private let publicCrypto = GroupCrypto(code: GroupCrypto.publicCode)
     private let store = PacketStore()
     private(set) var router: MeshRouter!
@@ -33,12 +43,13 @@ final class Engine: ObservableObject {
             d.set(deviceId, forKey: "device")
         }
         self.name = name
-        _crypto = GroupCrypto(code: code)
+        let c = GroupCrypto(code: code)
+        _crypto = c; _receipts = c.receipts()
         router = MeshRouter(send: { [weak self] peer, p in self?.route(peer, p) },
                             deliver: { [weak self] p in self?.onDeliver(p) })
         let all = store.loadAll()
         router.restore(all)
-        messages = all.compactMap { read($0) }.sorted { $0.ts < $1.ts }
+        load(all)
         mc = MultipeerLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("1-mc", s) }
         ble = BleLink(nodeId: deviceId, router: router) { [weak self] s in self?.setStatus("2-ble", s) }
         lora = LoraLink(router: router) { [weak self] s in self?.setStatus("3-lora", s) }
@@ -58,10 +69,24 @@ final class Engine: ObservableObject {
     /// Switches to another group (or just another name) without restarting the radios: every phone relays every
     /// group anyway. Messages of the old group stay stored and come back on rejoining. Call on the main thread.
     func rejoin(name: String, code: String) {
-        let c = GroupCrypto(code: code)
-        cryptoLock.withLock { _crypto = c }
+        flushAcks() // confirmations owed to the old group go out with its key
+        let c = GroupCrypto(code: code), r = c.receipts()
+        cryptoLock.withLock { _crypto = c; _receipts = r }
         self.name = name
-        messages = store.loadAll().compactMap { read($0) }.sorted { $0.ts < $1.ts }
+        load(store.loadAll())
+    }
+
+    /// Messages, receipts and the ids of my own messages, from stored packets. Main thread.
+    private func load(_ all: [Packet]) {
+        let rc = receiptCrypto
+        var msgs: [Message] = [], receipts: [Message] = [], own = Set<String>(), rIds = Set<String>()
+        for p in all {
+            if let m = read(p) { msgs.append(m); if m.sender == deviceId { own.insert(m.id) } }
+            else if let r = rc.open(p) { receipts.append(r); rIds.insert(p.id) }
+        }
+        idsLock.withLock { mine.formUnion(own); receiptIds.formUnion(rIds) }
+        messages = msgs.sorted { $0.ts < $1.ts }
+        deliveries = Deliveries(receipts)
     }
 
     /// Writes a message from this phone, to the group or to the Public channel. Call on the main thread.
@@ -71,6 +96,7 @@ final class Engine: ObservableObject {
         guard let c = try? (isPublic ? publicCrypto : crypto).seal(id: id, ts: ts, sender: deviceId, name: name, text: text)
         else { return true }
         let p = Packet(id: id, ts: ts, ttl: Self.maxTtl, cipher: c)
+        idsLock.withLock { _ = mine.insert(id) }
         store.append(p)
         messages.append(Message(id: id, ts: ts, sender: deviceId, name: name, text: text, isPublic: isPublic))
         router.publish(p)
@@ -93,12 +119,21 @@ final class Engine: ObservableObject {
 
     /// Called by the router while it holds its lock: every transport only queues the packet.
     private func route(_ peer: String, _ p: Packet) {
-        if peer == LoraLink.peer { lora.offer(p) }
+        let (newlyMine, receipt) = idsLock.withLock { (mine.contains(p.id) && !marked.contains(p.id), receiptIds.contains(p.id)) }
+        if peer == LoraLink.peer {
+            if receipt { return }             // receipts stay off LoRa, where airtime is scarce
+            lora.offer(p)
+            if !Meshtastic.fits(p) { return } // too long for the radio: not really sent
+        }
         else if peer.hasPrefix(BleLink.prefix) { ble.send(peer, p) }
         else if peer.hasPrefix(MultipeerLink.prefix) { mc.send(peer, p) }
         #if DEBUG
         if peer.hasPrefix(LanTestLink.prefix) { lan.send(peer, p) }
         #endif
+        if newlyMine {
+            idsLock.withLock { _ = marked.insert(p.id) }
+            DispatchQueue.main.async { self.handedOff.insert(p.id) }
+        }
     }
 
     /// This group's message, else a Public channel message, else nil (relayed but not shown).
@@ -114,11 +149,50 @@ final class Engine: ObservableObject {
         #if DEBUG
         DebugLog.write("received \(p.id) sent-at \(p.ts)")
         #endif
-        guard let m = read(p) else { return }
-        DispatchQueue.main.async {
-            self.messages.append(m)
-            self.messages.sort { $0.ts < $1.ts }
+        if let m = read(p) {
+            DispatchQueue.main.async {
+                self.messages.append(m)
+                self.messages.sort { $0.ts < $1.ts }
+                if !m.isPublic && m.sender != self.deviceId { self.ack(m.id) }
+            }
+        } else if let r = receiptCrypto.open(p) {
+            idsLock.withLock { _ = receiptIds.insert(p.id) }
+            DispatchQueue.main.async { self.deliveries.add(r) }
         }
+    }
+
+    /// Confirms a group message in the next receipt; messages arriving within 2 seconds share one. Main thread.
+    private func ack(_ id: String) {
+        pendingAcks.append(id)
+        if pendingAcks.count == 1 { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.flushAcks() } }
+    }
+
+    private func flushAcks() {
+        let ids = pendingAcks, rc = receiptCrypto
+        pendingAcks = []
+        for batch in Receipt.batches(ids) {
+            let id = Packet.newId(), ts = Int64(Date().timeIntervalSince1970 * 1000)
+            guard let c = try? rc.seal(id: id, ts: ts, sender: deviceId, name: name, text: Receipt.text(for: batch)) else { continue }
+            let p = Packet(id: id, ts: ts, ttl: Self.maxTtl, cipher: c)
+            idsLock.withLock { _ = receiptIds.insert(id) }
+            store.append(p)
+            router.publish(p)
+        }
+    }
+}
+
+/// Where one of my messages is: still on this phone, given to a phone in range, or confirmed by group members.
+enum Delivery: Equatable {
+    case waiting, sent, delivered([Reader])
+}
+
+extension Engine {
+    /// nil for other people's messages, and for my older ones that haven't gone out since the app started.
+    func delivery(of m: Message) -> Delivery? {
+        guard m.sender == deviceId else { return nil }
+        if !m.isPublic, let r = deliveries.readers[m.id], !r.isEmpty { return .delivered(r) }
+        if handedOff.contains(m.id) { return .sent }
+        return m.ts >= startedAt ? .waiting : nil
     }
 }
 

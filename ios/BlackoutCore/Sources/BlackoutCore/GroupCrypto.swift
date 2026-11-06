@@ -25,6 +25,19 @@ public final class GroupCrypto: Sendable {
     private let key: SymmetricKey
 
     public init(code: String) { key = SymmetricKey(data: GroupCrypto.deriveKey(code)) }
+    private init(key: SymmetricKey) { self.key = key }
+
+    /// The group's delivery-receipt key (spec/FORMAT.md, "Delivery receipts"). Apps that don't know receipts can't
+    /// open them with the group or public key, so they relay them without showing them.
+    public func receipts() -> GroupCrypto {
+        GroupCrypto(key: SymmetricKey(data: key.withUnsafeBytes { GroupCrypto.deriveReceiptKey(Data($0)) }))
+    }
+
+    /// HKDF-SHA256 of the group key, no salt, info "darkproof-receipt-v1", 32 bytes.
+    public static func deriveReceiptKey(_ groupKey: Data) -> Data {
+        HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: groupKey), info: Data("darkproof-receipt-v1".utf8),
+                               outputByteCount: 32).withUnsafeBytes { Data($0) }
+    }
 
     /// PBKDF2-HMAC-SHA256 over the UTF-8 bytes of the NFC-normalized group code.
     public static func deriveKey(_ code: String) -> Data {

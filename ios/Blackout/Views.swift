@@ -361,6 +361,7 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var tooLong = false
     @State private var toPublic = false
+    @State private var readers: ReaderList?
     @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
@@ -394,11 +395,19 @@ struct ChatView: View {
                                 let newRun = prev == nil || prev!.sender != m.sender || prev!.name != m.name
                                     || CheckIn.of(prev!.text) != nil
                                 let time = Self.time.string(from: Date(timeIntervalSince1970: Double(m.ts) / 1000))
+                                let delivery = engine.delivery(of: m)
+                                let showReaders: () -> Void = {
+                                    if case .delivered(let r) = delivery { readers = ReaderList(id: m.id, readers: r) }
+                                }
                                 Group {
                                     if let c = CheckIn.of(m.text) {
-                                        CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time, battery: CheckIn.battery(in: m.text))
+                                        VStack(alignment: .trailing, spacing: 4) {
+                                            CheckInRow(checkIn: c, name: mine ? nil : m.name, time: time, battery: CheckIn.battery(in: m.text))
+                                            if let delivery { StatusLine(time: nil, delivery: delivery).padding(.horizontal, 6).onTapGesture(perform: showReaders) }
+                                        }
                                     } else {
-                                        Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil, time: time)
+                                        Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil, time: time,
+                                               delivery: delivery, tapStatus: showReaders)
                                     }
                                 }
                                 .padding(.top, newRun && i > 0 ? 10 : 0)
@@ -423,6 +432,7 @@ struct ChatView: View {
                 .padding(.horizontal, 16).padding(.vertical, 10)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .sheet(item: $readers) { DeliveredSheet(readers: $0.readers) }
         .alert("Too long for LoRa: it will travel only over Bluetooth and Wi-Fi", isPresented: $tooLong) { Button("OK", role: .cancel) {} }
     }
 
@@ -468,6 +478,8 @@ struct Bubble: View {
     let mine: Bool
     var name: String? = nil
     var time: String? = nil
+    var delivery: Delivery? = nil
+    var tapStatus: () -> Void = {}
     var isError = false
     var busy = false
 
@@ -483,10 +495,80 @@ struct Bubble: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16).padding(.vertical, 11)
             .background(mine ? Color.white : Theme.tile, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            if let time { Text(time).font(.system(size: 12)).foregroundStyle(Theme.faint).padding(.horizontal, 6) }
+            if time != nil || delivery != nil {
+                StatusLine(time: time, delivery: delivery).padding(.horizontal, 6).onTapGesture(perform: tapStatus)
+            }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, 48)
+    }
+}
+
+/// Time and, for your own messages, where the message is: waiting, sent, or delivered to whom.
+struct StatusLine: View {
+    let time: String?
+    let delivery: Delivery?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let time { Text(time) }
+            if let delivery {
+                if time != nil { Text("·") }
+                Image(systemName: delivery.symbol).font(.system(size: 10, weight: .bold))
+                Text(delivery.label)
+            }
+        }
+        .font(.system(size: 12)).lineLimit(1)
+        .foregroundStyle(delivery.map { if case .delivered = $0 { return Theme.dim } else { return Theme.faint } } ?? Theme.faint)
+    }
+}
+
+extension Delivery {
+    var symbol: String {
+        switch self {
+        case .waiting: return "clock"
+        case .sent: return "checkmark"
+        case .delivered: return "checkmark.circle.fill"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .waiting: return "Waiting for a phone in range"
+        case .sent: return "Sent"
+        case .delivered(let r):
+            let n = r.map(\.name)
+            if n.count == 1 { return "Delivered to \(n[0])" }
+            if n.count == 2 { return "Delivered to \(n[0]) and \(n[1])" }
+            return "Delivered to \(n[0]), \(n[1]) and \(n.count - 2) more"
+        }
+    }
+}
+
+struct ReaderList: Identifiable { let id: String; let readers: [Reader] }
+
+/// Everyone whose phone confirmed one of your messages.
+struct DeliveredSheet: View {
+    let readers: [Reader]
+
+    var body: some View {
+        SheetPage(title: "Delivered") {
+            VStack(spacing: 0) {
+                ForEach(readers, id: \.id) { r in
+                    HStack {
+                        Text(r.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
+                        Spacer()
+                        Text(ChatView.time.string(from: Date(timeIntervalSince1970: Double(r.ts) / 1000)))
+                            .font(.system(size: 15)).foregroundStyle(Theme.dim)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 14)
+                    if r.id != readers.last?.id { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 20) }
+                }
+            }
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            Text("Delivered means their phone got the message. It doesn't mean they have read it.")
+                .font(.system(size: 14)).foregroundStyle(Theme.dim)
+        }
     }
 }
 

@@ -67,6 +67,25 @@ else means no battery level. Apps that don't know it just show the text.
 
 A person's status is their most recent check-in, and so is their battery level.
 
+## Delivery receipts
+
+When a phone gets a new group message from someone else, it confirms it with a receipt, so the sender sees
+"Delivered to …".
+
+- A receipt is an ordinary packet: marker `0xB2`, a new random id, the reader's clock as `ts`, ttl 16.
+- It is sealed exactly like a message, but with the group's **receipt key**: HKDF-SHA256 (RFC 5869) with the group
+  key as input key material, no salt, info = the ASCII bytes of `darkproof-receipt-v1`, 32-byte output.
+  - Example: for the code `test-group-1` the group key is
+    `5b3b419c3127c6562d34f9357179690746274ea9f6088385901e83d1d4055a9a` and the receipt key is
+    `496bfa142c33041abecd0fdb71763051e81c2fed0a55cbc1c0a7af8311d4a225`.
+- Plaintext fields: `sender` = the reader's device id, `name` = the reader's display name, `text` = the ids of the
+  confirmed messages (16 lowercase hex chars each), separated by single spaces, at most 200 per receipt.
+- Phones confirm only group messages: not Public channel messages, and not their own. Each message is confirmed
+  at most once, when it first arrives; messages arriving within about 2 seconds share one receipt.
+- Receipts are not sent over LoRa radios, where airtime is scarce.
+- Apps that don't know receipts can't open them with the group or public key, so they store and relay them like any
+  other packet and never show them.
+
 ## Forwarding rules
 
 - **Flooding:** each packet goes to every connected peer except the one it came from.
