@@ -738,6 +738,7 @@ struct AiView: View {
     @ObservedObject private var ai = LocalAi.shared
     @State private var draft = ""
     @State private var choosingModel = false
+    @AppStorage("groupName") private var groupName = "My group"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -807,7 +808,10 @@ struct AiView: View {
                 Composer(draft: $draft, placeholder: ai.busy ? "Thinking…" : "Ask a question",
                          enabled: !ai.busy && ai.selectedReady) {
                     let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !t.isEmpty { draft = ""; ai.send(t) }
+                    if !t.isEmpty {
+                        draft = ""
+                        ai.send(t, situation: Situation.text(engine: engine, groupName: groupName, me: LocationService.shared.location?.spot))
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -853,7 +857,7 @@ struct ModelPicker: View {
 
     var body: some View {
         SheetPage(title: "AI model") {
-            Text("Models run entirely on this iPhone. Bigger ones answer better but slower.")
+            Text("Models run entirely on this iPhone. Bigger ones answer better but slower. This iPhone has \(LocalAi.memoryGB) GB of memory: only models that fit are shown.")
                 .font(.system(size: 15)).foregroundStyle(Theme.dim)
             ForEach(LocalAi.catalog) { m in row(m) }
         }
@@ -868,6 +872,15 @@ struct ModelPicker: View {
                 if ai.selectedId == m.id && ai.states[m.id] == .ready { Chip("In use", Theme.safe) }
             }
             Text(m.detail).font(.system(size: 15)).foregroundStyle(Theme.text)
+            switch ai.speed(m) {
+            case .measured(let s):
+                Label("On this iPhone: about \(s) s per answer", systemImage: "timer").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
+            case .estimated(let r):
+                Label("On this iPhone: about \(r.lowerBound)–\(r.upperBound) s per answer (estimate until you use it)", systemImage: "timer")
+                    .font(.system(size: 14)).foregroundStyle(Theme.dim)
+            case .unknown:
+                Label("Speed on this iPhone shows after the first answers", systemImage: "timer").font(.system(size: 14)).foregroundStyle(Theme.dim)
+            }
             Text("\(size) · \(m.license)").font(.system(size: 13)).foregroundStyle(Theme.dim)
             switch ai.states[m.id] ?? .missing {
             case .ready:

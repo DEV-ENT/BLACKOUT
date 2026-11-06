@@ -85,13 +85,16 @@ cd ios/BlackoutCore && swift test    # Swift core
 
 ## AI models (iPhone)
 
-The app downloads a model once, while internet is available, and checks its SHA-256.
+The app downloads a model once, while internet is available, and checks its SHA-256. It offers only the models that fit the iPhone's memory, and shows how long answers take on that iPhone (measured once used, estimated before).
 
-| Model | Size | License |
-|---|---|---|
-| Qwen 2.5 1.5B Instruct | 1.1 GB | Apache 2.0 |
-| Llama 3.2 3B Instruct | 2.0 GB | Llama 3.2 Community License (Built with Llama) |
-| Qwen 2.5 3B Instruct | 2.1 GB | Qwen Research License (non-commercial only), so debug builds only |
+| Model | Size | License | Offered on | On an iPhone 15 |
+|---|---|---|---|---|
+| Gemma 4 E2B (recommended) | 2.8 GB | Apache 2.0 | iPhones with 6 GB or more | 3–21 s per answer |
+| Qwen 3.5 4B | 2.7 GB | Apache 2.0 | iPhones with 6 GB or more | 11–60 s per answer |
+| Gemma 4 E4B | 4.6 GB | Apache 2.0 | iPhones with 8 GB or more | not tested yet |
+| Qwen 3.5 2B | 1.4 GB | Apache 2.0 | iPhones with 4 GB (11, 12, 13, SE) | less reliable |
+
+Only the official instruct versions are offered. The assistant also gets the group's latest check-ins, battery levels and shared places with each question, so it can answer "who hasn't checked in?".
 
 Small models can be wrong. In a real medical emergency, use the AI's answers carefully.
 
