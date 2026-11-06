@@ -272,9 +272,9 @@
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Blackout-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Blackout uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Blackout connects directly to nearby iPhones to exchange messages without internet.";
+				INFOPLIST_KEY_CFBundleDisplayName = DarkProof;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -288,7 +288,7 @@
 					"-framework",
 					llama,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = it.blackout.mesh;
+				PRODUCT_BUNDLE_IDENTIFIER = it.darkproof.mesh;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -307,9 +307,9 @@
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Blackout-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = Blackout;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Blackout uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Blackout connects directly to nearby iPhones to exchange messages without internet.";
+				INFOPLIST_KEY_CFBundleDisplayName = DarkProof;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -323,7 +323,7 @@
 					"-framework",
 					llama,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = it.blackout.mesh;
+				PRODUCT_BUNDLE_IDENTIFIER = it.darkproof.mesh;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;

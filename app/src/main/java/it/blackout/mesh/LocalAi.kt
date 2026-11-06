@@ -20,7 +20,7 @@ object LocalAi {
     fun download(c: Context) {
         file(c).delete()
         c.getSystemService(DownloadManager::class.java).enqueue(
-            DownloadManager.Request(Uri.parse(URL)).setTitle("Blackout AI model")
+            DownloadManager.Request(Uri.parse(URL)).setTitle("DarkProof AI model")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalFilesDir(c, null, FILE))
     }

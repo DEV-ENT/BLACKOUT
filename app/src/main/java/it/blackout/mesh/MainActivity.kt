@@ -120,7 +120,7 @@ class MainActivity : Activity() {
         } }
         val share = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; visibility = View.GONE
-            addView(label("Give Blackout to another Android phone without internet, with Quick Share or Bluetooth."))
+            addView(label("Give DarkProof to another Android phone without internet, with Quick Share or Bluetooth."))
             addView(Button(context).apply { text = "Share the app"; setOnClickListener { ApkShare.share(this@MainActivity) } })
             addView(label("\nWi-Fi board: people without the app join this phone's Wi-Fi network and read and post Public messages in their browser."))
             addView(boardButton); addView(boardStatus)

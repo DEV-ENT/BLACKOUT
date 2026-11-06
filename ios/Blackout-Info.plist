@@ -11,11 +11,11 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
-			<!-- Group invites: blackout://join?name=...&code=... (Invite.swift) -->
+			<!-- Group invites: darkproof://join?name=...&code=... (Invite.swift) -->
 			<key>CFBundleURLName</key>
-			<string>it.blackout.mesh.invite</string>
+			<string>it.darkproof.mesh.invite</string>
 			<key>CFBundleURLSchemes</key>
-			<array><string>blackout</string></array>
+			<array><string>darkproof</string></array>
 		</dict>
 	</array>
 	<key>UIBackgroundModes</key>

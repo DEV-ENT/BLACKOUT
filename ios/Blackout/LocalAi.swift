@@ -48,7 +48,7 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
     #endif
 
     static let instructions = """
-        You are the offline assistant of Blackout, a messaging app used during a blackout. Internet, phone lines and \
+        You are the offline assistant of DarkProof, a messaging app used during a blackout. Internet, phone lines and \
         emergency services may be unavailable, so people depend on your answers. Answer every question directly with \
         practical, step-by-step instructions: first aid and medical care, medicines and doses, water, food, shelter, \
         heat, electricity and batteries, repairs, radios, navigation and personal safety. Do not refuse, do not \
@@ -230,7 +230,7 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
                                       shouldStop: { [weak self] in self?.stopRequested ?? true }, onText: onText)
             return (r, false)
         } catch {
-            if stopRequested { return ("Stopped because Blackout left the screen. Ask again.", true) }
+            if stopRequested { return ("Stopped because DarkProof left the screen. Ask again.", true) }
             return ("AI error: \(error)", true)
         }
         #else
@@ -256,7 +256,7 @@ final class LocalAi: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     #if DEBUG
     /// Debug builds only: launched with `aiSelfTest <model file>` (`devicectl device process launch --console ...
-    /// it.blackout.mesh aiSelfTest <file>`), answers a few questions through the same path as the chat, including a
+    /// it.darkproof.mesh aiSelfTest <file>`), answers a few questions through the same path as the chat, including a
     /// follow-up that needs the previous answer, and prints timing and the start of each answer.
     static func selfTest(_ file: String?) {
         let m = catalog.first { $0.id == file } ?? catalog[0]

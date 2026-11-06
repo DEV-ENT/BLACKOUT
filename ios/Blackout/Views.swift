@@ -69,7 +69,7 @@ struct SetupView: View {
                     .accessibilityHidden(true).padding(.top, 8)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 0) {
-                        Text("BLACKOUT").tracking(5)
+                        Text("DARKPROOF").tracking(5)
                         Cursor()
                     }
                     .font(Theme.mono(36, .heavy)).foregroundStyle(Theme.text)
@@ -102,7 +102,7 @@ struct SetupView: View {
                     if joining {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "qrcode.viewfinder").font(.title2).foregroundStyle(Theme.amber)
-                            Text("Got an invite QR? Open the iPhone Camera, point it at the QR code, and tap the Blackout link.")
+                            Text("Got an invite QR? Open the iPhone Camera, point it at the QR code, and tap the DarkProof link.")
                                 .font(.subheadline).foregroundStyle(Theme.text)
                         }
                         InputField(label: "Or type the group code", hint: "Your friend finds it under People > Invite friends.",
@@ -127,7 +127,7 @@ struct SetupView: View {
                         }
                         .buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty)
                         Text(cleanName.isEmpty ? "Enter your name first." :
-                                "Blackout makes a secret code for the group. Then you get a QR code to invite friends.")
+                                "DarkProof makes a secret code for the group. Then you get a QR code to invite friends.")
                             .font(.footnote).foregroundStyle(Theme.dim)
                     }
                 }
@@ -236,7 +236,7 @@ struct MeshHeader: View {
             if open {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(engine.statusLines, id: \.self) { Text($0) }
-                    Text("Messages hop from phone to phone. Keep Blackout running near other phones.").padding(.top, 4)
+                    Text("Messages hop from phone to phone. Keep DarkProof running near other phones.").padding(.top, 4)
                 }
                 .font(Theme.mono(11)).foregroundStyle(Theme.dim)
                 .transition(.opacity)
@@ -262,7 +262,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             if engine.messages.isEmpty {
                 EmptyState(title: "No messages yet",
-                           text: "Messages from your group and the Public channel show up here. Invite friends from the People tab, then keep Blackout open near each other.") {
+                           text: "Messages from your group and the Public channel show up here. Invite friends from the People tab, then keep DarkProof open near each other.") {
                     Radar(phones: engine.phones, radio: engine.radioLinked).frame(width: 150, height: 150)
                 }
             } else {
@@ -296,7 +296,7 @@ struct ChatView: View {
                     ChannelPill(title: String(groupName.prefix(14)), selected: !toPublic, color: Theme.amber) { toPublic = false }
                     ChannelPill(title: "Public", selected: toPublic, color: Theme.open) { toPublic = true }
                     Spacer()
-                    Text(toPublic ? "Everyone with Blackout can read it" : "Only your group can read it").lineLimit(1).minimumScaleFactor(0.8)
+                    Text(toPublic ? "Everyone with DarkProof can read it" : "Only your group can read it").lineLimit(1).minimumScaleFactor(0.8)
                         .font(.caption).foregroundStyle(toPublic ? Theme.open : Theme.dim)
                 }
                 Composer(draft: $draft, placeholder: toPublic ? "Message to everyone" : "Message to your group",

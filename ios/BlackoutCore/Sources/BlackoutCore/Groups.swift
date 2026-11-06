@@ -2,21 +2,21 @@ import Foundation
 import Security
 
 /// Group invites, so nobody has to type a code: a link carrying the group's name and code, shown as a QR code or
-/// sent by AirDrop. Format: blackout://join?name=<name>&code=<code> (spec/FORMAT.md, "Invites"). Anyone who has the
+/// sent by AirDrop. Format: darkproof://join?name=<name>&code=<code> (spec/FORMAT.md, "Invites"). Anyone who has the
 /// link can read the group, like anyone who knows the code.
 public enum Invite {
     public static let maxGroupName = 24
 
     public static func url(name: String, code: String) -> URL {
         var c = URLComponents()
-        c.scheme = "blackout"; c.host = "join"
+        c.scheme = "darkproof"; c.host = "join"
         c.queryItems = [URLQueryItem(name: "name", value: name), URLQueryItem(name: "code", value: code)]
         return c.url!
     }
 
     /// The group name and code in an invite link, or nil if it is not one.
     public static func parse(_ url: URL) -> (name: String, code: String)? {
-        guard url.scheme?.lowercased() == "blackout", url.host?.lowercased() == "join",
+        guard url.scheme?.lowercased() == "darkproof", url.host?.lowercased() == "join",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
               let code = items.first(where: { $0.name == "code" })?.value?.trimmingCharacters(in: .whitespacesAndNewlines),
               code.count >= 8

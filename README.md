@@ -1,6 +1,8 @@
-# BLACKOUT
+# DarkProof
 
-Blackout is a messaging app for when there is no internet and no mobile network. Phones talk to each other directly and pass messages along, so a message can reach someone who is out of range of the sender. An on-device AI helps with practical questions, and an optional LoRa radio extends the range to kilometres.
+<img src="brand/darkproof-logo.png" alt="DarkProof logo" width="160">
+
+DarkProof is a messaging app for when there is no internet and no mobile network. Phones talk to each other directly and pass messages along, so a message can reach someone who is out of range of the sender. An on-device AI helps with practical questions, and an optional LoRa radio extends the range to kilometres.
 
 There are two apps that work together: one for **Android** and one for **iPhone**. They use the same message format and encryption.
 
@@ -28,7 +30,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
   - The People tab shows who is in your group, who is in range now, and when you last heard from everyone else.
   - **I'm safe** and **Need help** check-in buttons.
   - Groups you leave are kept, so you can switch back.
-- **Public channel.** Anyone with Blackout can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
+- **Public channel.** Anyone with DarkProof can read and post on it, whatever their group. Every phone relays every message, including messages from other groups that it cannot read.
 - **Android extras:**
   - **Share app:** sends the app itself to another Android phone over Quick Share or Bluetooth, with no internet.
   - **Wi-Fi board:** the phone opens its own Wi-Fi network and a web page, so people without the app can read and post Public messages from a browser.
@@ -56,7 +58,7 @@ There are two apps that work together: one for **Android** and one for **iPhone*
    ```bash
    ./gradlew assembleDebug
    ```
-4. Install. You need a phone with Google Play Services; uninstall older Blackout versions first.
+4. Install. You need a phone with Google Play Services; uninstall older DarkProof versions first.
    ```bash
    adb install -r app/build/outputs/apk/debug/app-debug.apk
    ```
@@ -115,7 +117,7 @@ Small models can be wrong. In a real medical emergency, use the AI's answers car
 
 ## Privacy and TestFlight
 
-- Privacy policy: [PRIVACY.md](PRIVACY.md). Blackout has no servers and collects no data.
+- Privacy policy: [PRIVACY.md](PRIVACY.md). DarkProof has no servers and collects no data.
 - How to put the iPhone app on TestFlight: [docs/TESTFLIGHT.md](docs/TESTFLIGHT.md).
 
 ## Known limits

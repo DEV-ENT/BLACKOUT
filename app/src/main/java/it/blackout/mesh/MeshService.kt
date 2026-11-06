@@ -26,7 +26,7 @@ class MeshService : Service() {
         val ch = "mesh"
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(ch, "Network", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val n = Notification.Builder(this, ch).setContentTitle("Blackout active").setContentText("Relaying messages")
+        val n = Notification.Builder(this, ch).setContentTitle("DarkProof active").setContentText("Relaying messages")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth).setContentIntent(open).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) else startForeground(1, n)
         val name = i?.getStringExtra("name"); val code = i?.getStringExtra("code")
@@ -43,7 +43,7 @@ class MeshService : Service() {
     private fun status(s: String) { MeshEngine.transportStatus = s; MeshEngine.notifyUi() }
 
     private fun begin() {
-        svc = "it.blackout.mesh.v1" // the same for every Blackout phone: all relay for each other (spec/FORMAT.md)
+        svc = "it.blackout.mesh.v1" // the same for every DarkProof phone: all relay for each other (spec/FORMAT.md)
         client = Nearby.getConnectionsClient(this)
         val lora = LoraLink(this); MeshEngine.lora = lora; lora.start()
         val ble = BleLink(this, MeshEngine.deviceId); MeshEngine.ble = ble

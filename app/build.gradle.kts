@@ -3,7 +3,7 @@ android {
     namespace = "it.blackout.mesh"
     compileSdk = 35
     defaultConfig {
-        applicationId = "it.blackout.mesh"
+        applicationId = "it.darkproof.mesh"
         minSdk = 26; targetSdk = 34; versionCode = 4; versionName = "0.4"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }

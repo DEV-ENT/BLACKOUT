@@ -4,7 +4,7 @@ import XCTest
 final class GroupsTests: XCTestCase {
     func testInviteLinkRoundTrip() {
         let url = Invite.url(name: "Casa di Nonna & co", code: "K7QF-2M9X-PA4T-W8RJ")
-        XCTAssertEqual(url.scheme, "blackout")
+        XCTAssertEqual(url.scheme, "darkproof")
         let i = Invite.parse(url)
         XCTAssertEqual(i?.name, "Casa di Nonna & co")
         XCTAssertEqual(i?.code, "K7QF-2M9X-PA4T-W8RJ")
@@ -17,13 +17,13 @@ final class GroupsTests: XCTestCase {
 
     func testInviteRejectsOtherLinks() {
         XCTAssertNil(Invite.parse(URL(string: "https://join?code=ABCDEFGHJK")!))
-        XCTAssertNil(Invite.parse(URL(string: "blackout://other?code=ABCDEFGHJK")!))
-        XCTAssertNil(Invite.parse(URL(string: "blackout://join?code=short")!))
-        XCTAssertNil(Invite.parse(URL(string: "blackout://join?name=x")!))
+        XCTAssertNil(Invite.parse(URL(string: "darkproof://other?code=ABCDEFGHJK")!))
+        XCTAssertNil(Invite.parse(URL(string: "darkproof://join?code=short")!))
+        XCTAssertNil(Invite.parse(URL(string: "darkproof://join?name=x")!))
     }
 
     func testInviteNameDefaultsAndIsCapped() {
-        XCTAssertEqual(Invite.parse(URL(string: "blackout://join?code=ABCDEFGHJK")!)?.name, "Group")
+        XCTAssertEqual(Invite.parse(URL(string: "darkproof://join?code=ABCDEFGHJK")!)?.name, "Group")
         let long = String(repeating: "x", count: 60)
         XCTAssertEqual(Invite.parse(Invite.url(name: long, code: "ABCDEFGHJK"))?.name.count, Invite.maxGroupName)
     }

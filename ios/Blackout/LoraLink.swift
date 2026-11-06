@@ -106,7 +106,7 @@ final class LoraLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         switch c.state {
         case .poweredOn: connect()
         case .poweredOff: close(); status("Bluetooth is off")
-        case .unauthorized: status("Bluetooth not allowed (Settings > Blackout)")
+        case .unauthorized: status("Bluetooth not allowed (Settings > DarkProof)")
         case .unsupported: status("Bluetooth not available on this device")
         default: break
         }

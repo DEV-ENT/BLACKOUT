@@ -178,7 +178,7 @@ object WifiBoard {
     }
 
     private val PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Blackout board</title><style>
+<title>DarkProof board</title><style>
 body{background:#000;color:#f2f2f2;font:16px -apple-system,system-ui,sans-serif;margin:0 auto;padding:20px 16px;max-width:640px}
 .k,h1,button{font-family:ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
 h1{font-size:22px;font-weight:800;margin:0 0 6px}h1 b{color:#ffa61a}.n{color:#8f8f8f;font-size:13px}
@@ -186,7 +186,7 @@ h1{font-size:22px;font-weight:800;margin:0 0 6px}h1 b{color:#ffa61a}.n{color:#8f
 .m{margin:14px 0}.b{background:#1f1f1f;border-radius:18px;padding:10px 14px;margin-top:4px;display:inline-block;max-width:85%;white-space:pre-wrap}
 input,textarea,button{width:100%;box-sizing:border-box;font:inherit;margin:6px 0;padding:13px;border-radius:12px;border:1px solid #333;background:#1f1f1f;color:#f2f2f2}
 button{background:#ffa61a;color:#000;font-weight:800;border:0;font-family:ui-monospace,Menlo,monospace}</style></head><body>
-<h1>Blackout<b>_</b></h1><p class="n">Public board. No internet needed. Everything here is public: anyone on the Blackout network can read it.</p>
+<h1>DarkProof<b>_</b></h1><p class="n">Public board. No internet needed. Everything here is public: anyone on the DarkProof network can read it.</p>
 <div id="list"></div>
 <input id="name" placeholder="Your name" maxlength="30"><textarea id="text" placeholder="Message" maxlength="500" rows="3"></textarea>
 <button id="send">Send</button><p id="info" class="n"></p>

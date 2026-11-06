@@ -1,7 +1,8 @@
-# Blackout wire format (v0.4, marker byte 0xB2)
+# DarkProof wire format (v0.4, marker byte 0xB2)
 
 The Android and iPhone apps must produce and accept exactly these bytes.
 `test-vectors.txt` holds byte-exact examples; both apps' unit tests check against it.
+The app was called Blackout before. Protocol constants such as `blackout-mesh-v1`, `blackout-public`, `blackout-mesh` and `it.blackout.mesh.v1` keep that name on purpose: changing them would break every existing group and device.
 
 ## Packet
 
@@ -36,7 +37,7 @@ A packet that fails to decrypt is still stored and forwarded. It just isn't show
 
 ## Groups and the Public channel
 
-- **Every Blackout device relays for every other.** Devices connect to any Blackout device they find, whatever its group, and forward all packets. A group exists only through its code: only members can decrypt its messages.
+- **Every DarkProof device relays for every other.** Devices connect to any DarkProof device they find, whatever its group, and forward all packets. A group exists only through its code: only members can decrypt its messages.
 - **Public channel:** messages sealed with the code `blackout-public`, which everyone knows. Anyone can read and post them, including people without the app through the Wi-Fi board (Android). Apps show them marked as public.
 - **Reading:** a device tries its own group's key first, then the public key. A packet that opens with neither is relayed but not shown.
 
@@ -45,7 +46,7 @@ A packet that fails to decrypt is still stored and forwarded. It just isn't show
 An invite link carries a group's name and code so nobody has to type the code:
 
 ```
-blackout://join?name=<group name>&code=<group code>
+darkproof://join?name=<group name>&code=<group code>
 ```
 
 - Both values are URL-encoded query items. `code` has at least 8 characters. `name` is only a label shown on screen; it is not used for encryption, and a missing name means "Group".
@@ -91,7 +92,7 @@ An iPhone in the background advertises in a way Android cannot see. It can still
 
 ### Service UUID
 
-`bec33cd5-a64e-4e1a-b8c1-868db67d0df3`, the same for every Blackout device (see "Groups and the Public channel").
+`bec33cd5-a64e-4e1a-b8c1-868db67d0df3`, the same for every DarkProof device (see "Groups and the Public channel").
 
 - **Advertisement:** connectable. It contains only this 128-bit service UUID, with no device name.
 

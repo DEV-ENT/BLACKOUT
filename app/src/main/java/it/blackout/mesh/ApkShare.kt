@@ -19,18 +19,18 @@ import java.io.File
  */
 object ApkShare {
     private const val MIME = "application/vnd.android.package-archive"
-    val URI: Uri = Uri.parse("content://it.blackout.mesh.apk/Blackout.apk")
+    val URI: Uri = Uri.parse("content://it.darkproof.mesh.apk/DarkProof.apk")
 
     fun share(a: Activity) {
         if (!a.applicationInfo.splitSourceDirs.isNullOrEmpty()) {
             // Installed as split APKs (e.g. from an app store bundle): the base APK alone would not install.
-            Toast.makeText(a, "This copy of Blackout was installed in parts and can't be shared as one file.", Toast.LENGTH_LONG).show()
+            Toast.makeText(a, "This copy of DarkProof was installed in parts and can't be shared as one file.", Toast.LENGTH_LONG).show()
             return
         }
         val send = Intent(Intent.ACTION_SEND).setType(MIME).putExtra(Intent.EXTRA_STREAM, URI)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .apply { clipData = ClipData.newRawUri("Blackout.apk", URI) } // lets the share sheet itself read it too
-        a.startActivity(Intent.createChooser(send, "Share Blackout with Quick Share or Bluetooth"))
+            .apply { clipData = ClipData.newRawUri("DarkProof.apk", URI) } // lets the share sheet itself read it too
+        a.startActivity(Intent.createChooser(send, "Share DarkProof with Quick Share or Bluetooth"))
         Toast.makeText(a, "On the other phone: open the file and allow installing apps from that source.", Toast.LENGTH_LONG).show()
     }
 }
@@ -45,7 +45,7 @@ class ApkProvider : ContentProvider() {
         ParcelFileDescriptor.open(apk(), ParcelFileDescriptor.MODE_READ_ONLY)
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): Cursor =
-        MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)).apply { addRow(arrayOf<Any>("Blackout.apk", apk().length())) }
+        MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)).apply { addRow(arrayOf<Any>("DarkProof.apk", apk().length())) }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, args: Array<out String>?) = 0

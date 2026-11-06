@@ -82,7 +82,7 @@ struct PeopleView: View {
                     if engine.phones == 0 { ConnectionHelp(engine: engine) }
                     Kicker(people.isEmpty ? "People" : "People · \(people.count)").padding(.top, 6).padding(.horizontal, 4)
                     if people.isEmpty {
-                        Text("Nobody from \(groupName) yet. Invite friends, then keep Blackout open near each other.")
+                        Text("Nobody from \(groupName) yet. Invite friends, then keep DarkProof open near each other.")
                             .font(.subheadline).foregroundStyle(Theme.dim).padding(.horizontal, 4)
                     }
                     ForEach(people) { PersonRow(person: $0, inRange: engine.linkedNodes.contains($0.id), now: t.date) }
@@ -192,7 +192,7 @@ struct ConnectionHelp: View {
     private var bluetoothProblem: String? {
         let s = engine.status["2-ble"] ?? ""
         if s.contains("Bluetooth is off") { return "Bluetooth is off. Turn it on in Control Center." }
-        if s.contains("not allowed") { return "Blackout may not use Bluetooth. Allow it in Settings." }
+        if s.contains("not allowed") { return "DarkProof may not use Bluetooth. Allow it in Settings." }
         if s.contains("not available") { return "This device has no Bluetooth." }
         return nil
     }
@@ -204,10 +204,10 @@ struct ConnectionHelp: View {
                 bluetoothProblem == nil ? Theme.live : Theme.alert,
                 bluetoothProblem ?? "Bluetooth is on.")
             tip("iphone.radiowaves.left.and.right", Theme.amber,
-                "Open Blackout on both phones and stay within about 10–50 m. Walls cut the range: try outside or by a window.")
+                "Open DarkProof on both phones and stay within about 10–50 m. Walls cut the range: try outside or by a window.")
             tip("wifi", Theme.amber, "If asked, allow Local Network: iPhones also connect over Wi-Fi, with no internet.")
             tip("point.3.connected.trianglepath.dotted", Theme.amber,
-                "Farther away? Messages hop through any phone with Blackout in between. For kilometers, pair a LoRa radio in the Radio tab.")
+                "Farther away? Messages hop through any phone with DarkProof in between. For kilometers, pair a LoRa radio in the Radio tab.")
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
             }
@@ -248,10 +248,10 @@ struct InviteSheet: View {
                             .frame(maxWidth: 290)
                             .accessibilityLabel("Invite QR code")
                     }
-                    Text("Your friend points their iPhone Camera at this code, then taps the Blackout link.")
+                    Text("Your friend points their iPhone Camera at this code, then taps the DarkProof link.")
                         .font(.subheadline).foregroundStyle(Theme.text).multilineTextAlignment(.center)
-                    ShareLink(item: url, subject: Text("Join \(groupName) on Blackout"),
-                              message: Text("Join my group \(groupName) on Blackout. Group code: \(code)")) {
+                    ShareLink(item: url, subject: Text("Join \(groupName) on DarkProof"),
+                              message: Text("Join my group \(groupName) on DarkProof. Group code: \(code)")) {
                         Label("Send invite", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(PrimaryButton())

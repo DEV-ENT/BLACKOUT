@@ -1,6 +1,6 @@
-# Putting Blackout on TestFlight
+# Putting DarkProof on TestFlight
 
-TestFlight lets up to 10,000 people install Blackout from a link before it is on the App Store. Testers need the free TestFlight app, and each build expires after 90 days.
+TestFlight lets up to 10,000 people install DarkProof from a link before it is on the App Store. Testers need the free TestFlight app, and each build expires after 90 days.
 
 The project is ready: version 0.4 (build 4), app icon, privacy manifest, iPhone only. Release builds leave out the debug tools and the Qwen 2.5 3B model, whose license forbids commercial use.
 
@@ -11,9 +11,9 @@ The project is ready: version 0.4 (build 4), app icon, privacy manifest, iPhone 
 3. **Pick the new team.** Open `ios/Blackout.xcodeproj` → target Blackout → Signing & Capabilities → Team. The project still has the free Personal Team (MT94WQCB6S), which cannot upload.
 4. **Create the app** in App Store Connect (https://appstoreconnect.apple.com) → Apps → + → New App:
    - Platform: iOS
-   - Name: Blackout. If that name is taken, try something like "Blackout Mesh".
-   - Bundle ID: `it.blackout.mesh`
-   - SKU: anything, e.g. `blackout`
+   - Name: DarkProof. If that name is taken, try something like "DarkProof Mesh".
+   - Bundle ID: `it.darkproof.mesh`
+   - SKU: anything, e.g. `darkproof`
 
 ## 2. Upload a build
 
@@ -29,11 +29,11 @@ Every upload needs a higher build number: raise `CURRENT_PROJECT_VERSION` (now 4
 
 ## 3. What App Store Connect asks
 
-- **Encryption (export compliance).** Blackout encrypts messages end to end with standard algorithms: AES-256-GCM and PBKDF2, through Apple's CryptoKit. It uses nothing proprietary. Answer Apple's questions with that; they tell you whether any document is needed.
+- **Encryption (export compliance).** DarkProof encrypts messages end to end with standard algorithms: AES-256-GCM and PBKDF2, through Apple's CryptoKit. It uses nothing proprietary. Answer Apple's questions with that; they tell you whether any document is needed.
 - **App Privacy.** Choose "Data Not Collected".
-- **Privacy policy URL:** https://github.com/DEV-ENT/BLACKOUT/blob/main/PRIVACY.md
+- **Privacy policy URL:** https://github.com/DEV-ENT/DarkProof/blob/main/PRIVACY.md
 - **Beta App Review notes** (needed for external testers). Paste something like:
-  > Blackout sends messages between nearby phones without internet, over Bluetooth and Wi-Fi peer-to-peer. With one device: enter any name and a group code of 8 or more characters; the top bar shows SEARCHING until another phone with Blackout is nearby. With two devices: use the same group code and keep them within about 10 m. The AI tab downloads an on-device model (1.1 GB) once, over the internet.
+  > DarkProof sends messages between nearby phones without internet, over Bluetooth and Wi-Fi peer-to-peer. With one device: enter any name and a group code of 8 or more characters; the top bar shows SEARCHING until another phone with DarkProof is nearby. With two devices: use the same group code and keep them within about 10 m. The AI tab downloads an on-device model (1.1 GB) once, over the internet.
 
 ## 4. Invite testers
 
@@ -46,5 +46,5 @@ Every upload needs a higher build number: raise `CURRENT_PROJECT_VERSION` (now 4
 ## Tell testers
 
 - Download an AI model while you still have internet. It does not work offline until it is downloaded.
-- Keep Blackout open, or at least running, near other phones. Phones connect on their own.
-- Blackout cannot reach anyone over long distances without LoRa radios. It hops from phone to phone.
+- Keep DarkProof open, or at least running, near other phones. Phones connect on their own.
+- DarkProof cannot reach anyone over long distances without LoRa radios. It hops from phone to phone.

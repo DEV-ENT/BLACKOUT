@@ -73,7 +73,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
             c.scanForPeripherals(withServices: [service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
             setNote("")
         case .poweredOff: dropAll(central: true); setNote("Bluetooth is off")
-        case .unauthorized: setNote("not allowed (Settings > Blackout > Bluetooth)")
+        case .unauthorized: setNote("not allowed (Settings > DarkProof > Bluetooth)")
         case .unsupported: setNote("not available on this device")
         default: break
         }
