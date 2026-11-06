@@ -91,14 +91,14 @@ final class Engine: ObservableObject {
 
     /// Writes a message from this phone, to the group or to the Public channel. Call on the main thread.
     /// Returns false if it is too long for a LoRa packet (it still travels over Bluetooth and Wi-Fi).
-    @discardableResult func send(_ text: String, isPublic: Bool = false) -> Bool {
+    @discardableResult func send(_ text: String, isPublic: Bool = false, photo: Data? = nil) -> Bool {
         let id = Packet.newId(), ts = Int64(Date().timeIntervalSince1970 * 1000)
-        guard let c = try? (isPublic ? publicCrypto : crypto).seal(id: id, ts: ts, sender: deviceId, name: name, text: text)
+        guard let c = try? (isPublic ? publicCrypto : crypto).seal(id: id, ts: ts, sender: deviceId, name: name, text: text, photo: photo)
         else { return true }
         let p = Packet(id: id, ts: ts, ttl: Self.maxTtl, cipher: c)
         idsLock.withLock { _ = mine.insert(id) }
         store.append(p)
-        messages.append(Message(id: id, ts: ts, sender: deviceId, name: name, text: text, isPublic: isPublic))
+        messages.append(Message(id: id, ts: ts, sender: deviceId, name: name, text: text, isPublic: isPublic, photo: photo))
         router.publish(p)
         return Meshtastic.fits(p)
     }
@@ -140,7 +140,7 @@ final class Engine: ObservableObject {
     private func read(_ p: Packet) -> Message? {
         if let m = crypto.open(p) { return m }
         guard let m = publicCrypto.open(p) else { return nil }
-        return Message(id: m.id, ts: m.ts, sender: m.sender, name: m.name, text: m.text, isPublic: true)
+        return Message(id: m.id, ts: m.ts, sender: m.sender, name: m.name, text: m.text, isPublic: true, photo: m.photo)
     }
 
     /// A packet seen for the first time: keep it, and show it if it belongs to this group or the Public channel.

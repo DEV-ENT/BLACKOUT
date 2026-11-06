@@ -276,6 +276,8 @@
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "If you choose, DarkProof adds your position to your check-ins and points you toward friends who shared theirs. Only your group can read it.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save photos from your group to your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -312,6 +314,8 @@
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "If you choose, DarkProof adds your position to your check-ins and points you toward friends who shared theirs. Only your group can read it.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save photos from your group to your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

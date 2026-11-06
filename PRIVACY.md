@@ -18,6 +18,7 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
   - **Public channel messages** can be read by anyone who has DarkProof.
   - **Places you share** (water, shelter, charging, medical) are Public channel messages: anyone nearby can read them, including the position if you choose to add yours.
   - Each message carries the name you entered and a random ID for your phone.
+  - **Photos you send** are group messages too: shrunk to a few hundred pixels and encrypted for your group.
   - **Check-ins** ("I'm safe", "I need help") carry your battery level.
   - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
   - **Delivery receipts:** your phone tells your group which of their messages it received, so they can see "Delivered". Receipts are encrypted for your group too.
@@ -28,6 +29,8 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
 
 - **Bluetooth**: to connect to nearby phones and to LoRa radios.
 - **Local network**: for Wi-Fi peer-to-peer connections between iPhones.
+- **Camera (iPhone, optional)**: only when you tap Take photo. Photos you choose from your library are picked by the system: DarkProof sees only the one you choose.
+- **Add to Photos (iPhone, optional)**: only if you save a photo from the chat.
 - **Location (iPhone, optional)**: only while the app is open: to add your position to check-ins if you turned that on, to add it to a place you share if you choose, to sort shared places by distance, and to point you toward a friend or a place. Never in the background.
 - **Android only**:
   - **Location and nearby devices**: Android requires these to search for other phones over Bluetooth and Wi-Fi.

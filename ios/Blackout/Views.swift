@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import BlackoutCore
 
 struct RootView: View {
@@ -361,6 +362,12 @@ struct ChatView: View {
     @State private var toPublic = false
     @State private var readers: ReaderList?
     @State private var findingPlace: SharedPlace?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var choosingPhoto = false
+    @State private var takingPhoto = false
+    @State private var pending: PendingPhoto?
+    @State private var viewing: ViewedPhoto?
+    @State private var photoFailed = false
     @ObservedObject private var loc = LocationService.shared
     @AppStorage("groupName") private var groupName = "My group"
     static let time: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
@@ -414,8 +421,13 @@ struct ChatView: View {
                                             if let delivery { StatusLine(time: nil, delivery: delivery).padding(.horizontal, 6).onTapGesture(perform: showReaders) }
                                         }
                                     } else {
-                                        Bubble(text: m.text, mine: mine, name: newRun && !mine ? m.name : nil, time: time,
-                                               delivery: delivery, tapStatus: showReaders)
+                                        Bubble(text: m.photo == nil ? m.text : Photo.caption(m.text), mine: mine,
+                                               name: newRun && !mine ? m.name : nil, time: time,
+                                               delivery: delivery, tapStatus: showReaders, photo: m.photo) {
+                                            if let p = m.photo {
+                                                viewing = ViewedPhoto(id: m.id, jpeg: p, caption: Photo.caption(m.text), from: mine ? "You" : m.name)
+                                            }
+                                        }
                                     }
                                 }
                                 .padding(.top, newRun && i > 0 ? 10 : 0)
@@ -436,13 +448,53 @@ struct ChatView: View {
                     }
                 }
             }
-            Composer(draft: $draft, placeholder: toPublic ? "Message everyone" : "Message \(groupName)", send: send)
-                .padding(.horizontal, 16).padding(.vertical, 10)
+            HStack(alignment: .bottom, spacing: 10) {
+                if !toPublic {
+                    Menu {
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button { takingPhoto = true } label: { Label("Take photo", systemImage: "camera") }
+                        }
+                        Button { choosingPhoto = true } label: { Label("Choose photo", systemImage: "photo.on.rectangle") }
+                    } label: {
+                        Image(systemName: "camera.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
+                            .frame(width: 50, height: 50).background(Circle().fill(Theme.tile))
+                    }
+                    .accessibilityLabel("Send a photo")
+                }
+                Composer(draft: $draft, placeholder: toPublic ? "Message everyone" : "Message \(groupName)", send: send)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
         }
         .background(Theme.bg.ignoresSafeArea())
         .sheet(item: $readers) { DeliveredSheet(readers: $0.readers) }
         .sheet(item: $findingPlace) { FindSheet(place: $0.place, by: $0.by, ts: $0.ts) }
+        .sheet(item: $viewing) { PhotoViewer(jpeg: $0.jpeg, caption: $0.caption, from: $0.from) }
+        .sheet(item: $pending) { p in
+            PhotoSendSheet(photo: p, groupName: groupName) { caption in
+                engine.send(Photo.text(caption: caption), photo: p.jpeg)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+        }
+        .photosPicker(isPresented: $choosingPhoto, selection: $photoItem, matching: .images)
+        .onChange(of: photoItem) { item in
+            guard let item else { return }
+            Task {
+                let data = try? await item.loadTransferable(type: Data.self)
+                await MainActor.run { photoItem = nil; prepare(data.flatMap { UIImage(data: $0) }) }
+            }
+        }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { image in takingPhoto = false; prepare(image) }.ignoresSafeArea()
+        }
+        .alert("This photo couldn't be made small enough to send.", isPresented: $photoFailed) { Button("OK", role: .cancel) {} }
         .alert("Too long for LoRa: it will travel only over Bluetooth and Wi-Fi", isPresented: $tooLong) { Button("OK", role: .cancel) {} }
+    }
+
+    /// Shrinks a picked or taken photo and opens the send sheet.
+    private func prepare(_ image: UIImage?) {
+        guard let image else { return }
+        guard let jpeg = PhotoShrinker.jpeg(image), let small = UIImage(data: jpeg) else { photoFailed = true; return }
+        pending = PendingPhoto(jpeg: jpeg, image: small)
     }
 
     private func send() {
@@ -489,12 +541,31 @@ struct Bubble: View {
     var time: String? = nil
     var delivery: Delivery? = nil
     var tapStatus: () -> Void = {}
+    var photo: Data? = nil
+    var tapPhoto: () -> Void = {}
     var isError = false
     var busy = false
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
             if let name { Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.dim).padding(.horizontal, 6) }
+            if let photo, let ui = UIImage(data: photo) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Image(uiImage: ui).resizable().scaledToFit().frame(maxWidth: 250)
+                    if !text.isEmpty {
+                        Text(text).font(.system(size: 17)).foregroundStyle(mine ? Color.black : Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                    }
+                }
+                .frame(maxWidth: 250, alignment: .leading)
+                .background(mine ? Color.white : Theme.tile)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .onTapGesture(perform: tapPhoto)
+                .accessibilityLabel(text.isEmpty ? "Photo" : "Photo: \(text)")
+                .accessibilityAddTraits(.isButton)
+            } else {
             Group {
                 if busy && text.isEmpty { Text("Thinking…").foregroundStyle(Theme.dim) }
                 else { Text(text).textSelection(.enabled) }
@@ -504,6 +575,7 @@ struct Bubble: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16).padding(.vertical, 11)
             .background(mine ? Color.white : Theme.tile, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
             if time != nil || delivery != nil {
                 StatusLine(time: time, delivery: delivery).padding(.horizontal, 6).onTapGesture(perform: tapStatus)
             }
@@ -555,6 +627,7 @@ extension Delivery {
 }
 
 struct ReaderList: Identifiable { let id: String; let readers: [Reader] }
+struct ViewedPhoto: Identifiable { let id: String; let jpeg: Data; let caption: String; let from: String }
 
 /// Everyone whose phone confirmed one of your messages.
 struct DeliveredSheet: View {

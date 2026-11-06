@@ -74,6 +74,18 @@ sharing.
 A person's status is their most recent check-in, and so is their battery level. Their position is the one in their
 most recent check-in that carried a position.
 
+## Photos
+
+A group message can carry one small photo in a **4th plaintext field**, which older readers skip (see "Encryption":
+readers ignore bytes after the third field):
+
+- The field has the same 2-byte length prefix. Its first byte is the type, `0x01` = JPEG, followed by the JPEG bytes.
+- At most 14000 JPEG bytes, so the packet stays under the 16000-byte cipher limit. Apps shrink photos to fit
+  (a few hundred pixels wide) before sending.
+- The 3rd field (`text`) is `📷 Photo`, or `📷 ` followed by a caption, so apps that don't know photos show that.
+- Readers ignore a 4th field with another type byte, and anything after the 4th field.
+- Photos go only to the group, never to the Public channel, and are too big for LoRa radios.
+
 ## Places
 
 A place is an ordinary **Public channel** message that tells everyone nearby where to find help, so apps that don't
