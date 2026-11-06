@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct BlackoutApp: App {
     init() {
+        OfflineMap.shared.setUp()
         #if DEBUG
         let args = CommandLine.arguments // devicectl ... launch --console it.darkproof.mesh aiSelfTest <model file>
         if let i = args.firstIndex(of: "aiSelfTest") { LocalAi.selfTest(args.indices.contains(i + 1) ? args[i + 1] : nil) }

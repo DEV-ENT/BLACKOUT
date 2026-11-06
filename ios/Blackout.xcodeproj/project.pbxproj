@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B1AC00000000000000000001 /* BlackoutCore in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000020 /* BlackoutCore */; };
+		B1AC00000000000000000040 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = B1AC00000000000000000041 /* MapLibre */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1AC00000000000000000001 /* BlackoutCore in Frameworks */,
+				B1AC00000000000000000040 /* MapLibre in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,6 +77,7 @@
 			name = Blackout;
 			packageProductDependencies = (
 				B1AC00000000000000000020 /* BlackoutCore */,
+				B1AC00000000000000000041 /* MapLibre */,
 			);
 			productName = Blackout;
 			productReference = B1AC00000000000000000002 /* Blackout.app */;
@@ -101,6 +104,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B1AC00000000000000000021 /* XCLocalSwiftPackageReference "BlackoutCore" */,
+				B1AC00000000000000000042 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B1AC00000000000000000006 /* Products */;
@@ -274,9 +278,9 @@
 				INFOPLIST_FILE = "Blackout-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = DarkProof;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "If you choose, DarkProof adds your position to your check-ins and points you toward friends who shared theirs. Only your group can read it.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save photos from your group to your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -312,9 +316,9 @@
 				INFOPLIST_FILE = "Blackout-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = DarkProof;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "DarkProof uses Bluetooth to exchange messages with nearby phones and LoRa radios without internet.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "DarkProof connects directly to nearby iPhones to exchange messages without internet.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "If you choose, DarkProof adds your position to your check-ins and points you toward friends who shared theirs. Only your group can read it.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "To take a photo and send it to your group.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "To save photos from your group to your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -366,10 +370,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		B1AC00000000000000000042 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/maplibre/maplibre-gl-native-distribution";
+			requirement = {
+				kind = exactVersion;
+				version = 6.31.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		B1AC00000000000000000020 /* BlackoutCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BlackoutCore;
+		};
+		B1AC00000000000000000041 /* MapLibre */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B1AC00000000000000000042 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
+			productName = MapLibre;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -23,7 +23,10 @@ DarkProof is a messaging app for when there is no internet. It has no servers, n
   - **Your position, only if you turn on "Share my location in check-ins"** in Settings. Each check-in then carries where you were and how precise the phone was. Like every group message, it is encrypted for your group.
   - **Delivery receipts:** your phone tells your group which of their messages it received, so they can see "Delivered". Receipts are encrypted for your group too.
 - **Wi-Fi board (Android only).** When you turn it on, anyone who joins your phone's Wi-Fi network can read Public channel messages and post new ones from a browser. Group messages are never shown there.
-- **AI model downloads.** These are the only time DarkProof uses the internet, and only when you tap Download. Models come from Hugging Face (huggingface.co), which sees your IP address like any other website. Your questions to the AI never leave the phone.
+DarkProof uses the internet only in these two cases, and never needs it to work:
+
+- **AI model downloads**, only when you tap Download. Models come from Hugging Face (huggingface.co), which sees your IP address like any other website. Your questions to the AI never leave the phone.
+- **Street maps (iPhone)**, when you tap Download map, or open the map while you have internet. Map data comes from OpenFreeMap (tiles.openfreemap.org), which sees your IP address and which map area is loaded, like any website. Nothing else is sent. The saved map stays on your phone.
 
 ## Permissions
 

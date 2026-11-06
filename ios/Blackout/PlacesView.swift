@@ -36,51 +36,97 @@ extension PlaceKind: Identifiable {
 struct PlacesView: View {
     @ObservedObject var engine: Engine
     @ObservedObject private var loc = LocationService.shared
+    @ObservedObject private var offline = OfflineMap.shared
     @State private var filter: PlaceKind?
     @State private var adding = false
     @State private var finding: SharedPlace?
+    @State private var findingPerson: Person?
+    @State private var showMap = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { t in
             let me = loc.location?.spot
             let shown = Self.sorted(engine.places.filter { filter == nil || $0.place.kind == filter }, from: me)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 14) {
                     ScreenTitle(title: "Places", subtitle: "Shared by everyone nearby, from any group")
-                    filters
-                    Button { adding = true } label: { Label("Share a place", systemImage: "plus") }.buttonStyle(PrimaryButton())
-                    if shown.isEmpty {
-                        Card {
-                            Text(filter.map { "No \($0.word.lowercased()) places yet" } ?? "No places yet")
-                                .font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
-                            Text("Know where there is water, shelter, a place to charge phones or medical help? Share it so people nearby can find it.")
-                                .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(shown) { s in
-                                PlaceRow(shared: s, me: me, now: t.date)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { if s.place.spot != nil { finding = s } }
-                                if s.id != shown.last?.id { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 76) }
-                            }
-                        }
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    }
-                    if me == nil {
-                        Text(loc.denied ? "Allow location for DarkProof in Settings to sort places by distance."
-                                        : "Finding your position to sort places by distance…")
-                            .font(.footnote).foregroundStyle(Theme.dim)
-                    }
+                    PillSwitch(left: "List", right: "Map", isRight: $showMap)
                 }
-                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
+                if showMap { map(shown, me: me, now: t.date) } else { list(shown, me: me, now: t.date) }
             }
-            .refreshable { loc.fix { _ in } }
             .background(Theme.bg.ignoresSafeArea())
         }
         .onAppear { loc.requestPermission(); loc.fix { _ in } }
         .sheet(isPresented: $adding) { AddPlaceSheet(engine: engine) }
         .sheet(item: $finding) { FindSheet(place: $0.place, by: $0.by, ts: $0.ts) }
+        .sheet(item: $findingPerson) { FindSheet(person: $0) }
+    }
+
+    private func list(_ shown: [SharedPlace], me: Spot?, now: Date) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                filters
+                Button { adding = true } label: { Label("Share a place", systemImage: "plus") }.buttonStyle(PrimaryButton())
+                if shown.isEmpty {
+                    Card {
+                        Text(filter.map { "No \($0.word.lowercased()) places yet" } ?? "No places yet")
+                            .font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                        Text("Know where there is water, shelter, a place to charge phones or medical help? Share it so people nearby can find it.")
+                            .font(.system(size: 15)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(shown) { s in
+                            PlaceRow(shared: s, me: me, now: now)
+                                .contentShape(Rectangle())
+                                .onTapGesture { if s.place.spot != nil { finding = s } }
+                            if s.id != shown.last?.id { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 76) }
+                        }
+                    }
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
+                if me == nil {
+                    Text(loc.denied ? "Allow location for DarkProof in Settings to sort places by distance."
+                                    : "Finding your position to sort places by distance…")
+                        .font(.footnote).foregroundStyle(Theme.dim)
+                }
+            }
+            .padding(.horizontal, 20).padding(.bottom, 24)
+        }
+        .refreshable { loc.fix { _ in } }
+    }
+
+    /// Street map with places and your group's last check-ins.
+    private func map(_ shown: [SharedPlace], me: Spot?, now: Date) -> some View {
+        let people = Person.all(in: engine.messages, me: engine.deviceId).filter { $0.spot != nil }
+        var pins = shown.compactMap { s -> MapPin? in
+            guard let sp = s.place.spot else { return nil }
+            return MapPin(id: "place-\(s.id)", lat: sp.lat, lon: sp.lon, title: s.place.kind.word,
+                          subtitle: s.place.note.isEmpty ? "By \(s.by), \(ago(s.ts, now))" : s.place.note,
+                          symbol: s.place.kind.symbol, letter: "", tint: .white)
+        }
+        pins += people.map { p in
+            MapPin(id: "person-\(p.id)", lat: p.spot!.lat, lon: p.spot!.lon, title: p.name,
+                   subtitle: "\(p.checkIn?.label ?? "Checked in") \(ago(p.spotTs, now))", symbol: nil,
+                   letter: String(p.name.prefix(1)).uppercased(),
+                   tint: p.checkIn == .help ? UIColor(Theme.help) : p.checkIn == .safe ? UIColor(Theme.safe) : .white)
+        }
+        var center = me
+        if center == nil, case .ready(_, let c, _) = offline.state { center = c }
+        return ZStack(alignment: .top) {
+            StreetMap(pins: pins, center: center) { id in
+                if id.hasPrefix("place-") { finding = shown.first { "place-\($0.id)" == id } }
+                else { findingPerson = people.first { "person-\($0.id)" == id } }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                OfflineMapCard(me: me)
+                Text("Map data © OpenStreetMap contributors · OpenFreeMap · OpenMapTiles")
+                    .font(.system(size: 11)).foregroundStyle(Theme.dim)
+                    .padding(.horizontal, 10).padding(.vertical, 4).background(Theme.bg.opacity(0.7), in: Capsule())
+            }
+            .padding(.horizontal, 12).padding(.top, 4)
+        }
     }
 
     private var filters: some View {

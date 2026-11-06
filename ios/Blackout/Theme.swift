@@ -167,3 +167,31 @@ struct ProgressLine: View {
         .accessibilityElement().accessibilityLabel("\(Int(progress * 100)) percent")
     }
 }
+
+/// Two-way switch in a capsule, e.g. List | Map.
+struct PillSwitch: View {
+    let left: String
+    let right: String
+    @Binding var isRight: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            segment(left, on: !isRight) { isRight = false }
+            segment(right, on: isRight) { isRight = true }
+        }
+        .padding(4).background(Capsule().fill(Theme.tile))
+        .animation(.easeOut(duration: 0.15), value: isRight)
+    }
+
+    private func segment(_ title: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(on ? Color.black : Theme.dim)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(Capsule().fill(on ? Color.white : .clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
