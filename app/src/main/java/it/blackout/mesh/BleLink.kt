@@ -295,10 +295,15 @@ class BleLink(private val ctx: Context, private val nodeId: String) {
         for ((type, payload) in frames) {
             if (links[l.id] !== l) return
             when (type) {
-                BleProtocol.HELLO -> if (l.remote == null) {
+                BleProtocol.HELLO -> {
                     val remote = BleProtocol.parseHello(payload)
                     if (remote == null || remote == nodeId) { drop(l, hard = true); return }
-                    hello(l, remote)
+                    when (l.remote) {
+                        null -> hello(l, remote)
+                        // spec "Restarts": the other app restarted on a connection that stayed up
+                        remote -> { enqueue(l, BleProtocol.hello(nodeId)); if (l.up) MeshEngine.router?.peerUp(l.id) }
+                        else -> { drop(l, hard = true); return }
+                    }
                 }
                 BleProtocol.PACKET -> if (l.up) Packet.decode(payload)?.let {
                     Log.d(TAG, "rx packet ${it.id} via ${l.id} from ${l.remote}")

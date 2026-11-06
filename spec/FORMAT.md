@@ -190,6 +190,16 @@ Each direction carries a stream of frames:
 - An unknown type, a version other than 1, or a bad length means: disconnect.
 - After both HELLOs, each side treats the link as a neighbor in the forwarding rules. That includes sending it all stored packets.
 
+### Restarts
+
+An app can restart while the Bluetooth connection stays up: iOS keeps an app's connections when it closes the app to
+free memory, and relaunches the app in the background when Bluetooth activity arrives. The restarted app starts the
+link over and sends HELLO again.
+- A device that gets a HELLO on a link that already has one **from the same node id** answers with its own HELLO again,
+  and sends the link all stored packets again (the receiver drops the ones it has). A HELLO with a different node id
+  means: disconnect.
+- A central whose peer republishes the DarkProof service (the service is invalidated) disconnects and connects again.
+
 ### Duplicate links
 
 Two devices may connect to each other twice, once in each direction. When a device sees a second link to a node id it already has a link with, it keeps only one:

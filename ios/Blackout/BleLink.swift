@@ -164,6 +164,11 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
         pump(l)
     }
 
+    /// The other side published its service again, e.g. its app restarted: start a fresh link.
+    func peripheral(_ p: CBPeripheral, didModifyServices invalidated: [CBService]) {
+        if let l = link(p), invalidated.contains(where: { $0.uuid == service }) { drop(l) }
+    }
+
     func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
         guard let l = link(p), error == nil, c.uuid == txUUID, let v = c.value else { return }
         onChunk(l, v)
@@ -253,9 +258,13 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralManagerDele
         for f in frames {
             guard links[l.id] === l else { return }
             switch f.type {
-            case BleProtocol.helloType where l.remote == nil:
+            case BleProtocol.helloType:
                 guard let r = BleProtocol.parseHello(f.payload), r != nodeId else { drop(l); return }
-                hello(l, r)
+                if l.remote == nil { hello(l, r) }
+                else if r == l.remote { // spec: "Restarts". The other app restarted on a connection that stayed up
+                    enqueue(l, BleProtocol.hello(nodeId: nodeId))
+                    if l.up { router.peerUp(l.id) } // everything stored, again: the receiver ignores what it has
+                } else { drop(l); return }
             case BleProtocol.packetType where l.up:
                 if let p = Packet.decode(f.payload) { router.receive(from: l.id, p) }
             default:
